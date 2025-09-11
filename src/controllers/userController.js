@@ -1,9 +1,7 @@
 const userModel = require('../models/userModel');
 
-// --- HÀM GETALLUSERS ĐÃ ĐƯỢC NÂNG CẤP ---
 const getAllUsers = async (req, res) => {
   try {
-    // Lấy các tham số từ query string (ví dụ: /api/users?page=2&orgId=3)
     const { page, limit, orgId } = req.query;
     const options = {
         page: parseInt(page, 10) || 1,
@@ -11,13 +9,12 @@ const getAllUsers = async (req, res) => {
         orgId: orgId ? parseInt(orgId, 10) : null,
     };
     const result = await userModel.findAll(options);
-    res.status(200).json(result); // Trả về cả danh sách user và tổng số lượng
+    res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ message: 'Lỗi server khi lấy danh sách người dùng.' });
   }
 };
 
-// ... (các hàm khác giữ nguyên)
 const createUserByAdmin = async (req, res) => {
   try {
     const newUser = await userModel.createUser(req.body);
@@ -72,6 +69,19 @@ const getUsersGrouped = async (req, res) => {
     res.status(500).json({ message: 'Lỗi server khi lấy danh sách người dùng theo nhóm.' });
   }
 };
+
+const getColleagues = async (req, res) => {
+    try {
+        const userId = req.user.user_id;
+        const colleagues = await userModel.findColleagues(userId);
+        res.status(200).json(colleagues);
+    } catch (error) {
+        console.error('Lỗi khi lấy danh sách đồng nghiệp:', error);
+        res.status(500).json({ message: 'Lỗi server khi lấy danh sách đồng nghiệp.' });
+    }
+};
+
+
 const savePushToken = async (req, res) => {
   const userId = req.user.user_id;
   const { token } = req.body;
@@ -94,6 +104,7 @@ module.exports = {
   updateUser,
   deleteUser,
   getUsersGrouped,
+  getColleagues,
   savePushToken,
 };
 

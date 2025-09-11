@@ -1,8 +1,6 @@
 const db = require('../config/database');
 const bcrypt = require('bcryptjs');
-const organizationModel = require('./organizationModel');
 
-// ... (các hàm khác giữ nguyên không thay đổi)
 const findByUsername = async (username) => {
   const { rows } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
   return rows[0];
@@ -138,12 +136,32 @@ const findPushTokensByMeetingId = async (meetingId) => {
     return rows.map(row => row.push_token);
 };
 
-// --- HÀM ĐÃ ĐƯỢC NÂNG CẤP ĐỂ SỬ DỤNG HÀM SQL ---
 const findAllGroupedByOrganization = async () => {
     const query = `SELECT build_org_tree_with_users();`;
     const { rows } = await db.query(query);
     return rows[0].build_org_tree_with_users || [];
 };
+
+/**
+ * [MỚI] Tìm tất cả đồng nghiệp trong cùng cơ quan với một người dùng.
+ * @param {number} userId - ID của người dùng hiện tại.
+ * @returns {Promise<object[]>} - Danh sách các người dùng là đồng nghiệp.
+ */
+const findColleagues = async (userId) => {
+    const query = `
+        SELECT DISTINCT u.user_id, u.full_name
+        FROM users u
+        JOIN user_organizations uo ON u.user_id = uo.user_id
+        WHERE uo.org_id IN (
+            SELECT org_id FROM user_organizations WHERE user_id = $1
+        )
+        AND u.user_id != $1
+        ORDER BY u.full_name;
+    `;
+    const { rows } = await db.query(query, [userId]);
+    return rows;
+};
+
 
 module.exports = { 
   findByUsername, 
@@ -157,6 +175,7 @@ module.exports = {
   updatePushToken,
   findPushTokensByUserIds,
   findUserWithOrgsById,
-  findPushTokensByMeetingId
+  findPushTokensByMeetingId,
+  findColleagues
 };
 
