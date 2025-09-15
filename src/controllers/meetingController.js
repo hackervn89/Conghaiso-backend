@@ -259,7 +259,8 @@ const checkInWithQr = async (req, res) => {
     const { token: qrToken } = req.body;
     const user = req.user;
     try {
-        const result = await meetingModel.checkInWithQr(meetingId, user.user_id, qrToken);
+        // Đã sửa: Hoán đổi thứ tự user.user_id và qrToken
+        const result = await meetingModel.checkInWithQr(meetingId, qrToken, user.user_id);
         if (!result) {
             return res.status(400).json({ message: 'Điểm danh thất bại. Mã QR không hợp lệ hoặc bạn không có trong danh sách tham dự.' });
         }
@@ -284,4 +285,3 @@ module.exports = {
     getQrCodeToken,
     checkInWithQr
 };
-

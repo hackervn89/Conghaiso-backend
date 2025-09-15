@@ -39,6 +39,26 @@ const login = async (req, res) => {
   }
 };
 
+//Logout
+const logout = async (req, res) => {
+  try {
+    // req.user được middleware 'protect' gắn vào từ token
+    const userId = req.user.user_id;
+
+    if (userId) {
+      // Gọi hàm từ userModel để cập nhật push_token thành NULL
+      await userModel.updatePushToken(userId, null);
+      console.log(`[Auth] Đã xoá push token cho người dùng: ${userId}`);
+    }
+
+    res.status(200).json({ message: 'Đăng xuất thành công, push token đã được xoá.' });
+  } catch (error) {
+    console.error('Lỗi trong quá trình đăng xuất:', error);
+    // Trả về lỗi nhưng không quá chi tiết để bảo mật
+    res.status(500).json({ message: 'Có lỗi xảy ra trong quá trình xử lý đăng xuất.' });
+  }
+};
+
 // --- SỬA LỖI QUAN TRỌNG: Đảm bảo /me trả về đủ thông tin ---
 const getMe = async (req, res) => {
   const user = req.user;
@@ -57,4 +77,4 @@ const getMe = async (req, res) => {
   });
 };
 
-module.exports = { login, getMe };
+module.exports = { login, getMe, logout };

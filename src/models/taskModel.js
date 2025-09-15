@@ -159,11 +159,13 @@ const update = async (taskId, taskData) => {
             await client.query(`INSERT INTO task_trackers (task_id, user_id) VALUES ${trackerValues};`);
         }
 
+        // [FIX] Sửa logic cập nhật tài liệu
         await client.query('DELETE FROM task_documents WHERE task_id = $1', [taskId]);
          if (documents && documents.length > 0) {
              for (const doc of documents) {
                 const docQuery = `INSERT INTO task_documents (task_id, doc_name, google_drive_file_id) VALUES ($1, $2, $3);`;
-                await client.query(docQuery, [taskId, doc.doc_name, doc.google_drive_file_id]);
+                // Đảm bảo google_drive_file_id là null nếu nó không được định nghĩa
+                await client.query(docQuery, [taskId, doc.doc_name, doc.google_drive_file_id || null]);
             }
         }
 
@@ -192,29 +194,50 @@ const remove = async (taskId) => {
 };
 
 const getTasksSummary = async (user) => {
-    let query = `
-        SELECT COUNT(DISTINCT t.task_id)
+    // Tạo các phần truy vấn cơ sở
+    let baseQuery = `
         FROM tasks t
     `;
+    let userJoins = '';
+    let userWhereClause = '';
     const params = [];
-    let whereClauses = [`t.due_date < CURRENT_TIMESTAMP`, `t.status != 'completed'`];
 
+    // Thêm bộ lọc theo người dùng nếu không phải Admin
     if (user.role !== 'Admin') {
-        query += `
+        userJoins = `
             LEFT JOIN task_assigned_orgs tao ON t.task_id = tao.task_id
             LEFT JOIN task_trackers tt ON t.task_id = tt.task_id
             LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id
         `;
-        whereClauses.push(`(t.creator_id = $1 OR tt.user_id = $1 OR uo.user_id = $1)`);
+        userWhereClause = `AND (t.creator_id = $1 OR tt.user_id = $1 OR uo.user_id = $1)`;
         params.push(user.user_id);
     }
 
-    if (whereClauses.length > 0) {
-        query += ' WHERE ' + whereClauses.join(' AND ');
-    }
+    // Sử dụng một truy vấn duy nhất với COUNT và FILTER để có hiệu suất tốt hơn
+    const finalQuery = `
+        SELECT 
+            COUNT(DISTINCT t.task_id) FILTER (WHERE t.due_date < CURRENT_TIMESTAMP AND t.status != 'completed' ${userWhereClause}) AS overdue_tasks,
+            COUNT(DISTINCT t.task_id) FILTER (WHERE (t.due_date >= CURRENT_TIMESTAMP OR t.due_date IS NULL) AND t.status != 'completed' ${userWhereClause}) AS ongoing_tasks
+        ${baseQuery}
+        ${userJoins}
+    `;
 
-    const { rows } = await db.query(query, params);
-    return parseInt(rows[0].count, 10);
+    try {
+        const { rows } = await db.query(finalQuery, params);
+        const { overdue_tasks, ongoing_tasks } = rows[0];
+
+        return {
+            overdueTasks: parseInt(overdue_tasks, 10),
+            ongoingTasks: parseInt(ongoing_tasks, 10)
+        };
+    } catch (error) {
+        console.error("Lỗi khi lấy tóm tắt công việc:", error);
+        // Trả về giá trị mặc định trong trường hợp lỗi
+        return {
+            overdueTasks: 0,
+            ongoingTasks: 0
+        };
+    }
 };
 
 

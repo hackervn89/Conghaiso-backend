@@ -8,9 +8,10 @@ const SERVICE_ACCOUNT_KEY_PATH = path.join(process.cwd(), process.env.GOOGLE_FCM
 let expo;
 // Kiểm tra xem file credentials có tồn tại không trước khi khởi tạo
 if (fs.existsSync(SERVICE_ACCOUNT_KEY_PATH)) {
+    const credentials = require(SERVICE_ACCOUNT_KEY_PATH);
     expo = new Expo({
       useFcmV1: true,
-      serviceAccountCredentials: require(SERVICE_ACCOUNT_KEY_PATH),
+      serviceAccountCredentials: credentials,
     });
 } else {
     console.warn(`[WARN] Không tìm thấy file FCM credentials tại: ${SERVICE_ACCOUNT_KEY_PATH}. Chức năng thông báo đẩy sẽ không hoạt động.`);
@@ -23,14 +24,21 @@ if (fs.existsSync(SERVICE_ACCOUNT_KEY_PATH)) {
 
 
 const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
+    // Lọc ra các token hợp lệ theo định dạng của Expo
     const validPushTokens = pushTokens.filter(token => Expo.isExpoPushToken(token));
 
-    if (validPushTokens.length === 0) {
+    const uniqueValidPushTokens = [...new Set(validPushTokens)];
+
+    if (uniqueValidPushTokens.length === 0) {
         console.log('[Notification] Không có push token hợp lệ nào để gửi đi.');
+        const invalidTokens = pushTokens.filter(token => token && !Expo.isExpoPushToken(token));
+        if (invalidTokens.length > 0) {
+            console.warn(`[Notification] Tìm thấy ${invalidTokens.length} token không hợp lệ (sai định dạng) trong DB:`, invalidTokens);
+        }
         return;
     }
 
-    const messages = validPushTokens.map(pushToken => ({
+    const messages = uniqueValidPushTokens.map(pushToken => ({
         to: pushToken,
         sound: 'default',
         title: title,
@@ -41,35 +49,36 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
     const chunks = expo.chunkPushNotifications(messages);
     const tickets = [];
 
-    console.log(`[Notification] Đang chuẩn bị gửi ${messages.length} thông báo...`);
-
     for (const chunk of chunks) {
         try {
             const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
             tickets.push(...ticketChunk);
-            console.log('[Notification] Đã gửi thành công một chunk thông báo và nhận được "vé gửi".');
         } catch (error) {
             console.error('Lỗi khi gửi chunk thông báo:', error);
         }
     }
 
-    // --- LOGIC MỚI: KIỂM TRA BIÊN NHẬN ĐỂ GỠ LỖI CHI TIẾT ---
     let receiptIds = [];
     for (const ticket of tickets) {
         if (ticket.status === 'ok' && ticket.id) {
             receiptIds.push(ticket.id);
+        } else if (ticket.status === 'error') {
+            // Ghi log ngay lập tức nếu Expo từ chối vé gửi
+            console.error(
+                `[Notification] Không thể xếp hàng thông báo. Lỗi từ Expo: ${ticket.message}`
+            );
+            if (ticket.details && ticket.details.error) {
+                console.error(`[Notification] Chi tiết lỗi: ${ticket.details.error}`);
+            }
         }
     }
 
     if (receiptIds.length > 0) {
-        console.log(`[Notification] Đã lên lịch kiểm tra "biên nhận" cho ${receiptIds.length} vé gửi.`);
         // Trong ứng dụng thực tế, bạn sẽ lưu receiptIds và kiểm tra bằng một tác vụ nền.
-        // Ở đây, chúng ta kiểm tra sau 15 giây để gỡ lỗi.
+        // Ở đây, chúng ta kiểm tra sau 10 giây để gỡ lỗi.
         setTimeout(async () => {
             try {
-                console.log('[Notification] Đang kiểm tra biên nhận từ máy chủ Expo...');
                 const receipts = await expo.getPushNotificationReceiptsAsync(receiptIds);
-                console.log('[Notification] Kết quả kiểm tra biên nhận:', receipts);
 
                 for (const receiptId in receipts) {
                     const { status, message, details } = receipts[receiptId];

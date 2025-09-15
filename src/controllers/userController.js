@@ -11,6 +11,7 @@ const getAllUsers = async (req, res) => {
     const result = await userModel.findAll(options);
     res.status(200).json(result);
   } catch (error) {
+    console.error('Lỗi server khi lấy danh sách người dùng:', error);
     res.status(500).json({ message: 'Lỗi server khi lấy danh sách người dùng.' });
   }
 };
@@ -23,6 +24,7 @@ const createUserByAdmin = async (req, res) => {
     if (error.code === '23505') {
         return res.status(400).json({ message: `Lỗi: ${error.constraint} đã tồn tại.` });
     }
+    console.error('Lỗi server khi tạo người dùng:', error);
     res.status(500).json({ message: 'Lỗi server khi tạo người dùng.' });
   }
 };
@@ -35,6 +37,7 @@ const getUserDetails = async (req, res) => {
             res.status(404).json({ message: 'Không tìm thấy người dùng.' });
         }
     } catch (error) {
+        console.error('Lỗi server khi lấy chi tiết người dùng:', error);
         res.status(500).json({ message: 'Lỗi server khi lấy chi tiết người dùng.' });
     }
 };
@@ -47,6 +50,7 @@ const updateUser = async (req, res) => {
     res.status(200).json({ message: 'Cập nhật người dùng thành công!', user: updatedUser });
   } catch (error)
  {
+    console.error('Lỗi server khi cập nhật người dùng:', error);
     res.status(500).json({ message: 'Lỗi server khi cập nhật người dùng.' });
   }
 };
@@ -58,6 +62,7 @@ const deleteUser = async (req, res) => {
     }
     res.status(200).json({ message: `Đã xóa thành công người dùng: ${deletedUser.username}` });
   } catch (error) {
+    console.error('Lỗi server khi xóa người dùng:', error);
     res.status(500).json({ message: 'Lỗi server khi xóa người dùng.' });
   }
 };
@@ -66,6 +71,7 @@ const getUsersGrouped = async (req, res) => {
     const groupedUsers = await userModel.findAllGroupedByOrganization();
     res.status(200).json(groupedUsers);
   } catch (error) {
+    console.error('Lỗi server khi lấy danh sách người dùng theo nhóm:', error);
     res.status(500).json({ message: 'Lỗi server khi lấy danh sách người dùng theo nhóm.' });
   }
 };

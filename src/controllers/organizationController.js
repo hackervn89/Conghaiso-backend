@@ -5,6 +5,7 @@ const getOrganizations = async (req, res) => {
     const organizations = await organizationModel.findAllHierarchical();
     res.status(200).json(organizations);
   } catch (error) {
+    console.error('Lỗi server khi lấy danh sách cơ quan:', error);
     res.status(500).json({ message: 'Lỗi server khi lấy danh sách cơ quan.' });
   }
 };
@@ -14,6 +15,7 @@ const createOrganization = async (req, res) => {
         const newOrg = await organizationModel.create(req.body);
         res.status(201).json(newOrg);
     } catch (error) {
+        console.error('Lỗi server khi tạo cơ quan:', error);
         res.status(500).json({ message: 'Lỗi server khi tạo cơ quan.' });
     }
 };
@@ -26,6 +28,7 @@ const updateOrganization = async (req, res) => {
         }
         res.status(200).json(updatedOrg);
     } catch (error) {
+        console.error('Lỗi server khi cập nhật cơ quan:', error);
         res.status(500).json({ message: 'Lỗi server khi cập nhật cơ quan.' });
     }
 };

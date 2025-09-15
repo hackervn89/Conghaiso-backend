@@ -4,6 +4,6 @@ src/config/oauth_credentials.json
 # Environment variables
 .env
 # Google Drive credentials
-config/credentials.json
+src/config/credentials.json
 src/config/fcm_credentials.json
 oauth_credentials.json

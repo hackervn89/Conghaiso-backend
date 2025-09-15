@@ -1,5 +1,5 @@
 const dashboardModel = require('../models/dashboardModel');
-const taskModel = require('../models/taskModel'); // <-- IMPORT MỚI
+const taskModel = require('../models/taskModel');
 
 const getDashboardStats = async (req, res) => {
     try {
@@ -8,8 +8,9 @@ const getDashboardStats = async (req, res) => {
         const stats = await dashboardModel.getStats(user);
 
         // [MỚI] Lấy thêm thống kê công việc (việc trễ hạn)
-        const taskSummary = await taskModel.getTasksSummary(user.user_id);
-        
+        // SỬA LỖI: Truyền vào cả đối tượng `user` để model có thể xử lý logic theo vai trò (role)
+        const taskSummary = await taskModel.getTasksSummary(user);
+
         // Gộp hai kết quả lại và trả về
         const combinedStats = { ...stats, ...taskSummary };
         
