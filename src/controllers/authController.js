@@ -35,6 +35,7 @@ const login = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Lỗi trong quá trình đăng nhập:', error);
     res.status(500).json({ message: 'Đã có lỗi xảy ra trên server.' });
   }
 };
