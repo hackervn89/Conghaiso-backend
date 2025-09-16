@@ -11,6 +11,7 @@ const organizationRoutes = require('./src/routes/organizationRoutes');
 const uploadRoutes = require('./src/routes/uploadRoutes');
 const dashboardRoutes = require('./src/routes/dashboardRoutes');
 const taskRoutes = require('./src/routes/taskRoutes');
+const reportRoutes = require('./src/routes/reportRoutes');
 
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/organizations', organizationRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/reports', reportRoutes);
 
 app.get('/api', (req, res) => {
   res.json({ message: 'Chào mừng đến với API Phòng Họp Số!' });
