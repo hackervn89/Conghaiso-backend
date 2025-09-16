@@ -81,19 +81,37 @@ const findAll = async (user, filters) => {
     
     // [CẬP NHẬT] Logic lọc theo trạng thái động
     if (dynamicStatus) {
-        switch (dynamicStatus) {
-            case 'on_time':
-                whereClauses.push(`t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE`);
-                break;
-            case 'overdue':
-                whereClauses.push(`t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE`);
-                break;
-            case 'completed_on_time':
-                whereClauses.push(`t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at <= t.due_date`);
-                break;
-            case 'completed_late':
-                whereClauses.push(`t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at > t.due_date`);
-                break;
+        let dynamicStatusArray = [];
+        if (Array.isArray(dynamicStatus)) {
+            dynamicStatusArray = dynamicStatus;
+        } else if (typeof dynamicStatus === 'string') {
+            dynamicStatusArray = dynamicStatus.split(',').map(s => s.trim());
+        }
+
+        const statusConditions = [];
+        dynamicStatusArray.forEach(statusItem => {
+            switch (statusItem) {
+                case 'on_time':
+                    statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE)`);
+                    break;
+                case 'overdue':
+                    statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)`);
+                    break;
+                case 'completed_on_time':
+                    statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at <= t.due_date)`);
+                    break;
+                case 'completed_late':
+                    statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at > t.due_date)`);
+                    break;
+                default:
+                    // For other specific statuses like 'pending', 'completed', etc.
+                    statusConditions.push(`t.status = '${statusItem}'`);
+                    break;
+            }
+        });
+
+        if (statusConditions.length > 0) {
+            whereClauses.push(`(${statusConditions.join(' OR ')})`);
         }
     }
 
