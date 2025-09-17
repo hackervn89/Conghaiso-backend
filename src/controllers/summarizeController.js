@@ -90,7 +90,7 @@ const summarizeDocument = async (req, res) => {
 
     // --- Debugging logs for document content ---
     console.log(`Extracted document content length: ${documentContent.length}`);
-    console.log(`First 500 characters of content: ${documentContent.substring(0, 500)}`);
+    console.log(`First 50 characters of content: ${documentContent.substring(0, 500)}`);
 
     // --- Tóm tắt bằng Gemini AI ---
     const { totalTokens } = await model.countTokens(documentContent);
