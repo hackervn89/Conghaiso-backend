@@ -2,8 +2,6 @@ const { google } = require('googleapis');
 const path = require('path');
 const fs = require('fs');
 const stream = require('stream');
-const extract = require('pdf-extraction'); // Import pdf-extraction
-const mammoth = require('mammoth'); // Import mammoth
 
 const KEYFILEPATH = path.join(process.cwd(), process.env.GOOGLE_OAUTH_CREDENTIALS_PATH);
 const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
@@ -134,7 +132,7 @@ const revokePublicPermission = async (fileId) => {
     }
   } catch (error) {
     console.error(`Lỗi khi thu hồi quyền cho file ${fileId}:`, error.message);
-    // Không ném lỗi ra ngoài để không làm sập các tiến trình khác
+    
   }
 };
 
@@ -159,7 +157,7 @@ const getFileMetadata = async (fileId) => {
   }
 };
 
-const exportDocumentContent = async (fileId) => {
+const exportDocumentContent = async (fileId) => { // Removed mimeType parameter as it will be determined internally
   try {
     const fileMetadata = await getFileMetadata(fileId);
     const originalMimeType = fileMetadata.mimeType;
@@ -184,6 +182,8 @@ const exportDocumentContent = async (fileId) => {
       });
     } else {
       // For other file types, try to download directly using files.get with alt=media
+      // This will work for plain text files, PDFs (if we parse them), DOCX (if we parse them)
+      // For now, we'll assume it's directly readable text or a simple download.
       const response = await drive.files.get({
         fileId: fileId,
         alt: 'media',
@@ -191,52 +191,22 @@ const exportDocumentContent = async (fileId) => {
         responseType: 'stream'
       });
 
-      const buffer = await new Promise((resolve, reject) => {
-        const chunks = [];
-        response.data.on('data', chunk => chunks.push(chunk));
-        response.data.on('end', () => resolve(Buffer.concat(chunks)));
+      content = await new Promise((resolve, reject) => {
+        let data = '';
+        response.data.on('data', chunk => data += chunk);
+        response.data.on('end', () => resolve(data));
         response.data.on('error', err => reject(err));
       });
 
-      if (originalMimeType === 'application/pdf') {
-        console.log(`[DriveService] Attempting to parse PDF for file ID: ${fileId}. Buffer length: ${buffer.length}`);
-        try {
-          const data = await extract(buffer); // Use pdf-extraction
-          content = data.text;
-          console.log(`[DriveService] PDF parsed. Content length: ${content.length}`);
-          if (content.length === 0) {
-            console.warn(`[DriveService] PDF parsing resulted in empty content for file ID: ${fileId}`);
-          }
-        } catch (pdfExtractError) {
-          console.error(`[DriveService] Error parsing PDF for file ID: ${fileId}:`, pdfExtractError.message);
-          // Re-throw to trigger fallback in controller
-          throw new Error(`PDF parsing failed: ${pdfExtractError.message}`);
-        }
-      } else if (originalMimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        console.log(`[DriveService] Attempting to parse DOCX for file ID: ${fileId}. Buffer length: ${buffer.length}`);
-        try {
-          const result = await mammoth.extractRawText({ buffer: buffer });
-          content = result.value; // The raw text
-          console.log(`[DriveService] DOCX parsed. Content length: ${content.length}`);
-          if (content.length === 0) {
-            console.warn(`[DriveService] DOCX parsing resulted in empty content for file ID: ${fileId}`);
-          }
-        } catch (mammothError) {
-          console.error(`[DriveService] Error parsing DOCX for file ID: ${fileId}:`, mammothError.message);
-          // Re-throw to trigger fallback in controller
-          throw new Error(`DOCX parsing failed: ${mammothError.message}`);
-        }
-      } else {
-        // For other non-native types, assume it's plain text or can be converted to string
-        content = buffer.toString('utf8');
-        console.log(`[DriveService] Non-native file (type: ${originalMimeType}) converted to string. Content length: ${content.length}`);
-      }
+      // TODO: For PDFs or DOCX, we would need a library to extract text from the stream.
+      // For now, if it's not plain text, this might return binary data or garbled text.
+      // We'll rely on the fallback for complex non-native files if this doesn't yield readable text.
     }
 
     return content;
 
   } catch (error) {
-    console.error(`Error exporting/downloading/parsing document content for file ${fileId}:`, error.message);
+    console.error(`Error exporting/downloading document content for file ${fileId}:`, error.message);
     throw error;
   }
 };
