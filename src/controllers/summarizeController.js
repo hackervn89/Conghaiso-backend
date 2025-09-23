@@ -1,7 +1,7 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { extractFileIdFromUrl, exportDocumentContent } = require("../services/googleDriveService");
 const axios = require('axios');
-const cheerio = require('cheerio');
+// const cheerio = require('cheerio');
 
 // Khởi tạo Gemini AI với khóa API
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -75,14 +75,14 @@ const summarizeDocument = async (req, res) => {
     }
 
     // --- Nếu Google Drive API không thành công hoặc không phải URL Drive, thử phương pháp HTTP GET + Cheerio ---
-    if (!documentContent || documentContent.trim().length === 0) {
-      console.log('Attempting to extract content using HTTP GET and Cheerio.');
-      const response = await axios.get(url);
-      const html = response.data;
-      const $ = cheerio.load(html);
-      documentContent = $('body').text(); // Trích xuất văn bản từ body HTML
-      console.log('Content extracted using HTTP GET and Cheerio.');
-    }
+    // if (!documentContent || documentContent.trim().length === 0) {
+    //   console.log('Attempting to extract content using HTTP GET and Cheerio.');
+    //   const response = await axios.get(url);
+    //   const html = response.data;
+    //   const $ = cheerio.load(html);
+    //   documentContent = $('body').text(); // Trích xuất văn bản từ body HTML
+    //   console.log('Content extracted using HTTP GET and Cheerio.');
+    // }
 
     if (!documentContent || documentContent.trim().length === 0) {
       throw new Error('Could not extract any meaningful document content.');
