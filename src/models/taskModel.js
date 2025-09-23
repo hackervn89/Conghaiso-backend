@@ -70,11 +70,6 @@ const findAll = async (user, filters) => {
         whereClauses.push(`(
             t.creator_id = ${userParamIndex}
             OR t.task_id IN (SELECT task_id FROM task_trackers WHERE user_id = ${userParamIndex})
-            OR t.task_id IN (
-                SELECT tao.task_id FROM task_assigned_orgs tao
-                JOIN user_organizations uo ON tao.org_id = uo.org_id
-                WHERE uo.user_id = ${userParamIndex}
-            )
         )`);
         params.push(user.user_id);
     }
@@ -223,11 +218,9 @@ const getTasksSummary = async (user) => {
     // Thêm bộ lọc theo người dùng nếu không phải Admin
     if (user.role !== 'Admin') {
         userJoins = `
-            LEFT JOIN task_assigned_orgs tao ON t.task_id = tao.task_id
             LEFT JOIN task_trackers tt ON t.task_id = tt.task_id
-            LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id
         `;
-        userWhereClause = `AND (t.creator_id = $1 OR tt.user_id = $1 OR uo.user_id = $1)`;
+        userWhereClause = `AND (t.creator_id = $1 OR tt.user_id = $1)`;
         params.push(user.user_id);
     }
 
