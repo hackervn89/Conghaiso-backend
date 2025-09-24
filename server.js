@@ -36,6 +36,17 @@ app.get('/api', (req, res) => {
   res.json({ message: 'Chào mừng đến với API Phòng Họp Số!' });
 });
 
+// Import and check database connection
+const db = require('./src/config/database');
+db.getClient()
+  .then(client => {
+    console.log('Đã kết nối thành công đến cơ sở dữ liệu.');
+    client.release();
+  })
+  .catch(err => {
+    console.error('Không thể kết nối đến cơ sở dữ liệu:', err);
+  });
+
 app.listen(PORT, () => {
   console.log(`Server đang chạy tại http://localhost:${PORT}`);
   
