@@ -46,100 +46,130 @@ const create = async (taskData, creatorId) => {
 };
 
 const findAll = async (user, filters) => {
-    // [CẬP NHẬT] Thay `status` bằng `dynamicStatus`
     const { dynamicStatus, orgId } = filters;
 
-    let query = `
+    // Step 1: Build the main query with filters
+    let mainQuery = `
         SELECT
             t.task_id, t.title, t.status, t.priority, t.due_date, t.completed_at, t.created_at,
-            (SELECT u.full_name FROM users u WHERE u.user_id = t.creator_id) as creator_name,
-            (SELECT json_agg(json_build_object('org_id', o.org_id, 'org_name', o.org_name))
-             FROM task_assigned_orgs tao JOIN organizations o ON tao.org_id = o.org_id
-             WHERE tao.task_id = t.task_id) as assigned_orgs,
-            (SELECT json_agg(json_build_object('user_id', u.user_id, 'full_name', u.full_name))
-             FROM task_trackers tt JOIN users u ON tt.user_id = u.user_id
-             WHERE tt.task_id = t.task_id) as trackers
+            u.full_name as creator_name
         FROM tasks t
+        LEFT JOIN users u ON t.creator_id = u.user_id
     `;
-
     const whereClauses = [];
     const params = [];
 
     if (user.role !== 'Admin') {
-        const userParamIndex = `$${params.length + 1}`;
+        const userParamIndex = `${params.length + 1}`;
         whereClauses.push(`(
             t.creator_id = ${userParamIndex}
             OR t.task_id IN (SELECT task_id FROM task_trackers WHERE user_id = ${userParamIndex})
         )`);
         params.push(user.user_id);
     }
-    
-    // [CẬP NHẬT] Logic lọc theo trạng thái động
-    if (dynamicStatus) {
-        let dynamicStatusArray = [];
-        if (Array.isArray(dynamicStatus)) {
-            dynamicStatusArray = dynamicStatus;
-        } else if (typeof dynamicStatus === 'string') {
-            dynamicStatusArray = dynamicStatus.split(',').map(s => s.trim());
-        }
 
+    if (dynamicStatus) {
+        let dynamicStatusArray = Array.isArray(dynamicStatus) ? dynamicStatus : String(dynamicStatus).split(',').map(s => s.trim());
         const statusConditions = [];
         dynamicStatusArray.forEach(statusItem => {
             switch (statusItem) {
-                case 'on_time':
-                    statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE)`);
-                    break;
-                case 'overdue':
-                    statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)`);
-                    break;
-                case 'completed_on_time':
-                    statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at <= t.due_date)`);
-                    break;
-                case 'completed_late':
-                    statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at > t.due_date)`);
-                    break;
-                default:
-                    // For other specific statuses like 'pending', 'completed', etc.
-                    statusConditions.push(`t.status = '${statusItem}'`);
-                    break;
+                case 'on_time': statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE)`); break;
+                case 'overdue': statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)`); break;
+                case 'completed_on_time': statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at <= t.due_date)`); break;
+                case 'completed_late': statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at > t.due_date)`); break;
+                default: statusConditions.push(`t.status = '${statusItem}'`); break;
             }
         });
-
-        if (statusConditions.length > 0) {
-            whereClauses.push(`(${statusConditions.join(' OR ')})`);
-        }
+        if (statusConditions.length > 0) whereClauses.push(`(${statusConditions.join(' OR ')})`);
     }
 
-
     if (orgId) {
-        whereClauses.push(`t.task_id IN (SELECT task_id FROM task_assigned_orgs WHERE org_id = $${params.length + 1})`);
+        whereClauses.push(`t.task_id IN (SELECT task_id FROM task_assigned_orgs WHERE org_id = ${params.length + 1})`);
         params.push(orgId);
     }
 
     if (whereClauses.length > 0) {
-        query += ' WHERE ' + whereClauses.join(' AND ');
+        mainQuery += ' WHERE ' + whereClauses.join(' AND ');
     }
 
-    query += ' ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC';
-    
-    const { rows } = await db.query(query, params);
-    return rows;
+    mainQuery += ' ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC';
+
+    // Step 2: Execute main query to get tasks
+    const { rows: tasks } = await db.query(mainQuery, params);
+    if (tasks.length === 0) {
+        return [];
+    }
+    const taskIds = tasks.map(t => t.task_id);
+
+    // Step 3: Fetch related data in batches
+    const orgsQuery = `
+        SELECT tao.task_id, o.org_id, o.org_name
+        FROM task_assigned_orgs tao
+        JOIN organizations o ON tao.org_id = o.org_id
+        WHERE tao.task_id = ANY($1::int[]);
+    `;
+    const trackersQuery = `
+        SELECT tt.task_id, u.user_id, u.full_name
+        FROM task_trackers tt
+        JOIN users u ON tt.user_id = u.user_id
+        WHERE tt.task_id = ANY($1::int[]);
+    `;
+
+    const [orgsResult, trackersResult] = await Promise.all([
+        db.query(orgsQuery, [taskIds]),
+        db.query(trackersQuery, [taskIds]),
+    ]);
+
+    // Step 4: Create maps for efficient data stitching
+    const orgsMap = new Map();
+    orgsResult.rows.forEach(row => {
+        if (!orgsMap.has(row.task_id)) orgsMap.set(row.task_id, []);
+        orgsMap.get(row.task_id).push({ org_id: row.org_id, org_name: row.org_name });
+    });
+
+    const trackersMap = new Map();
+    trackersResult.rows.forEach(row => {
+        if (!trackersMap.has(row.task_id)) trackersMap.set(row.task_id, []);
+        trackersMap.get(row.task_id).push({ user_id: row.user_id, full_name: row.full_name });
+    });
+
+    // Step 5: Stitch data together
+    tasks.forEach(task => {
+        task.assigned_orgs = orgsMap.get(task.task_id) || [];
+        task.trackers = trackersMap.get(task.task_id) || [];
+    });
+
+    return tasks;
 };
 
 
 const findById = async (taskId) => {
-    const query = `
-        SELECT 
-            t.*,
-            (SELECT COALESCE(json_agg(tao.org_id), '[]'::json) FROM task_assigned_orgs tao WHERE tao.task_id = t.task_id) as "assignedOrgIds",
-            (SELECT COALESCE(json_agg(tt.user_id), '[]'::json) FROM task_trackers tt WHERE tt.task_id = t.task_id) as "trackerIds",
-            (SELECT COALESCE(json_agg(json_build_object('doc_id', td.doc_id, 'doc_name', td.doc_name, 'google_drive_file_id', td.google_drive_file_id)), '[]'::json)
-             FROM task_documents td WHERE td.task_id = t.task_id) as documents
-        FROM tasks t
-        WHERE t.task_id = $1;
-    `;
-    const { rows } = await db.query(query, [taskId]);
-    return rows[0];
+    // Step 1: Get the core task details
+    const taskQuery = `SELECT * FROM tasks WHERE task_id = $1`;
+    const taskResult = await db.query(taskQuery, [taskId]);
+    const task = taskResult.rows[0];
+
+    if (!task) {
+        return null;
+    }
+
+    // Step 2: Fetch related data in parallel for efficiency
+    const orgsQuery = `SELECT org_id FROM task_assigned_orgs WHERE task_id = $1`;
+    const trackersQuery = `SELECT user_id FROM task_trackers WHERE task_id = $1`;
+    const docsQuery = `SELECT doc_id, doc_name, google_drive_file_id FROM task_documents WHERE task_id = $1 ORDER BY doc_id`;
+
+    const [orgsResult, trackersResult, docsResult] = await Promise.all([
+        db.query(orgsQuery, [taskId]),
+        db.query(trackersQuery, [taskId]),
+        db.query(docsQuery, [taskId]),
+    ]);
+
+    // Step 3: Stitch the data together into a single object
+    task.assignedOrgIds = orgsResult.rows.map(r => r.org_id);
+    task.trackerIds = trackersResult.rows.map(r => r.user_id);
+    task.documents = docsResult.rows;
+
+    return task;
 };
 
 const update = async (taskId, taskData) => {

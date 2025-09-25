@@ -21,7 +21,8 @@ const getTasksByOrganizationReport = async (req, res) => {
         const params = [];
         let paramIndex = 1;
 
-        if (status) {
+        // Refactored and fixed status filtering logic
+        if (status && status !== 'all') {
             const statusConditions = [];
             const statusValues = [];
             const statusArray = status.split(',').map(s => s.trim());
@@ -34,30 +35,8 @@ const getTasksByOrganizationReport = async (req, res) => {
                     case 'on_time':
                         statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE)`);
                         break;
-                    case 'all':
-                        // 'all' means no status filter, so we don't add any condition for it
-                        break;
                     default:
-                        // For other specific statuses like 'pending', 'completed', etc.
-                                if (status) {
-            const statusConditions = [];
-            const statusValues = [];
-            const statusArray = status.split(',').map(s => s.trim());
-
-            statusArray.forEach(s => {
-                switch (s) {
-                    case 'overdue':
-                        statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)`);
-                        break;
-                    case 'on_time':
-                        statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE)`);
-                        break;
-                    case 'all':
-                        // 'all' means no status filter, so we don't add any condition for it
-                        break;
-                    default:
-                        // For other specific statuses like 'pending', 'completed', etc.
-                        statusConditions.push(`t.status = ${paramIndex + statusValues.length}`); // Use paramIndex + current length of statusValues
+                        statusConditions.push(`t.status = ${paramIndex + statusValues.length}`);
                         statusValues.push(s);
                         break;
                 }
@@ -66,40 +45,27 @@ const getTasksByOrganizationReport = async (req, res) => {
             if (statusConditions.length > 0) {
                 query += ` AND (${statusConditions.join(' OR ')})`;
                 params.push(...statusValues);
-                paramIndex += statusValues.length; // Increment paramIndex by the number of status values added
+                paramIndex += statusValues.length;
             }
-        } else {
-            // Default to pending if no status is provided
+        } else if (!status) {
+            // Default to not showing completed tasks if no status is provided
             query += ` AND t.status != 'completed'`;
         }
-                        statusValues.push(s);
-                        break;
-                }
-            });
-
-            if (statusConditions.length > 0) {
-                query += ` AND (${statusConditions.join(' OR ')})`;
-                params.push(...statusValues);
-            }
-        } else {
-            // Default to pending if no status is provided
-            query += ` AND t.status != 'completed'`;
-        }
+        // If status is 'all', we don't add any status filter.
 
         if (startDate) {
-            query += ` AND t.due_date >= $${paramIndex++}`;
+            query += ` AND t.due_date >= ${paramIndex++}`;
             params.push(startDate);
         }
 
         if (endDate) {
-            query += ` AND t.due_date <= $${paramIndex++}`;
+            query += ` AND t.due_date <= ${paramIndex++}`;
             params.push(endDate);
         }
 
         if (organizationId) {
-            // Handle single or multiple organization IDs
-            const orgIds = Array.isArray(organizationId) ? organizationId : [organizationId];
-            query += ` AND o.org_id = ANY($${paramIndex++}::int[])`;
+            const orgIds = String(organizationId).split(',').map(id => parseInt(id.trim(), 10));
+            query += ` AND o.org_id = ANY(${paramIndex++}::int[])`;
             params.push(orgIds);
         }
 

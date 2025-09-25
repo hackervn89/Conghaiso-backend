@@ -10,18 +10,21 @@ const findById = async (id) => {
   return rows[0];
 };
 const findUserWithOrgsById = async (id) => {
-    const query = `
-        SELECT 
-            u.user_id, u.full_name, u.username, u.email, u.position, u.role,
-            COALESCE(
-                (SELECT json_agg(uo.org_id) FROM user_organizations uo WHERE uo.user_id = u.user_id),
-                '[]'::json
-            ) as "organizationIds"
-        FROM users u
-        WHERE u.user_id = $1;
-    `;
-    const { rows } = await db.query(query, [id]);
-    return rows[0];
+    const userQuery = 'SELECT user_id, full_name, username, email, position, role FROM users WHERE user_id = $1';
+    const orgsQuery = 'SELECT org_id FROM user_organizations WHERE user_id = $1';
+
+    const [userResult, orgsResult] = await Promise.all([
+        db.query(userQuery, [id]),
+        db.query(orgsQuery, [id]),
+    ]);
+
+    const user = userResult.rows[0];
+    if (!user) {
+        return null;
+    }
+
+    user.organizationIds = orgsResult.rows.map(r => r.org_id);
+    return user;
 };
 const createUser = async (userData) => {
   const { fullName, username, email, password, position, role, organizationIds } = userData;
@@ -149,14 +152,12 @@ const findAllGroupedByOrganization = async () => {
  */
 const findColleagues = async (userId) => {
     const query = `
-        SELECT DISTINCT u.user_id, u.full_name
-        FROM users u
-        JOIN user_organizations uo ON u.user_id = uo.user_id
-        WHERE uo.org_id IN (
-            SELECT org_id FROM user_organizations WHERE user_id = $1
-        )
-        AND u.user_id != $1
-        ORDER BY u.full_name;
+        SELECT DISTINCT u2.user_id, u2.full_name
+        FROM user_organizations uo1
+        JOIN user_organizations uo2 ON uo1.org_id = uo2.org_id
+        JOIN users u2 ON uo2.user_id = u2.user_id
+        WHERE uo1.user_id = $1 AND uo2.user_id != $1
+        ORDER BY u2.full_name;
     `;
     const { rows } = await db.query(query, [userId]);
     return rows;
