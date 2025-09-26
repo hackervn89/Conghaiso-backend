@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const bcrypt = require('bcryptjs');
 
+// ... (các hàm findByUsername, findById, findUserWithOrgsById giữ nguyên) ...
 const findByUsername = async (username) => {
   const { rows } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
   return rows[0];
@@ -54,30 +55,51 @@ const createUser = async (userData) => {
     client.release();
   }
 };
+
+// ================= TỐI ƯU HÓA HÀM findAll =================
 const findAll = async ({ page = 1, limit = 20, orgId = null }) => {
     const offset = (page - 1) * limit;
-    let baseQuery = `FROM users u`;
-    let countQuery = `SELECT COUNT(*) FROM users u`;
     const queryParams = [];
     let paramIndex = 1;
+
+    // Xây dựng các mệnh đề WHERE và JOIN
+    let filterClause = '';
     if (orgId) {
-        const filterClause = ` JOIN user_organizations uo ON u.user_id = uo.user_id WHERE uo.org_id = $${paramIndex}`;
-        baseQuery += filterClause;
-        countQuery += filterClause;
+        filterClause = `
+            JOIN user_organizations uo ON u.user_id = uo.user_id 
+            WHERE uo.org_id = $${paramIndex++}
+        `;
         queryParams.push(orgId);
-        paramIndex++;
     }
-    const totalResult = await db.query(countQuery, queryParams);
-    const totalCount = parseInt(totalResult.rows[0].count, 10);
+    
+    // Sử dụng Window Function để đếm tổng số dòng hiệu quả hơn
     const dataQuery = `
-        SELECT u.user_id, u.full_name, u.username, u.email, u.position, u.role 
-        ${baseQuery} 
+        SELECT 
+            u.user_id, u.full_name, u.username, u.email, u.position, u.role,
+            COUNT(*) OVER() as total_count
+        FROM users u
+        ${filterClause}
         ORDER BY u.user_id ASC 
-        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+        LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
-    const { rows: users } = await db.query(dataQuery, [...queryParams, limit, offset]);
+
+    queryParams.push(limit, offset);
+
+    const { rows } = await db.query(dataQuery, queryParams);
+
+    // Lấy tổng số từ dòng đầu tiên (nếu có)
+    const totalCount = rows.length > 0 ? parseInt(rows[0].total_count, 10) : 0;
+    
+    // Loại bỏ cột total_count khỏi kết quả trả về
+    const users = rows.map(user => {
+        const { total_count, ...rest } = user;
+        return rest;
+    });
+
     return { users, totalCount };
 };
+// ================= KẾT THÚC TỐI ƯU HÓA =================
+
 const update = async (id, userData) => {
   const { fullName, email, position, role, organizationIds } = userData;
   const client = await db.getClient();
@@ -145,11 +167,6 @@ const findAllGroupedByOrganization = async () => {
     return rows[0].build_org_tree_with_users || [];
 };
 
-/**
- * [MỚI] Tìm tất cả đồng nghiệp trong cùng cơ quan với một người dùng.
- * @param {number} userId - ID của người dùng hiện tại.
- * @returns {Promise<object[]>} - Danh sách các người dùng là đồng nghiệp.
- */
 const findColleagues = async (userId) => {
     const query = `
         SELECT DISTINCT u2.user_id, u2.full_name
@@ -179,4 +196,3 @@ module.exports = {
   findPushTokensByMeetingId,
   findColleagues
 };
-
