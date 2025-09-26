@@ -2,48 +2,40 @@ const db = require('../config/database');
 const googleDriveService = require('../services/googleDriveService');
 const findById = async (id, user) => {
   const query = `
-    WITH meeting_details AS (
-      SELECT
-        m.*,
-        (
-          SELECT json_agg(
-            json_build_object(
-              'user_id', u.user_id,
-              'full_name', u.full_name,
-              'status', ma.status,
-              'check_in_time', ma.check_in_time
-            ) ORDER BY u.full_name ASC
-          )
-          FROM meeting_attendees ma
-          JOIN users u ON ma.user_id = u.user_id
-          WHERE ma.meeting_id = m.meeting_id
-        ) AS attendees,
-        (
-          SELECT json_agg(
-            json_build_object(
-              'agenda_id', a.agenda_id,
-              'title', a.title,
-              'display_order', a.display_order,
-              'documents', (
-                SELECT COALESCE(json_agg(
-                  json_build_object(
-                    'doc_id', d.doc_id,
-                    'doc_name', d.doc_name,
-                    'google_drive_file_id', d.google_drive_file_id
-                  ) ORDER BY d.doc_id
-                ), '[]'::json)
-                FROM documents d
-                WHERE d.agenda_id = a.agenda_id
-              )
-            ) ORDER BY a.display_order
-          )
+    SELECT
+      m.*,
+      (
+        SELECT json_agg(json_build_object(
+          'user_id', u.user_id,
+          'full_name', u.full_name,
+          'status', ma.status,
+          'check_in_time', ma.check_in_time
+        ))
+        FROM meeting_attendees ma
+        JOIN users u ON ma.user_id = u.user_id
+        WHERE ma.meeting_id = m.meeting_id
+      ) AS attendees,
+      (
+        SELECT json_agg(ag)
+        FROM (
+          SELECT
+            a.agenda_id, a.title, a.display_order,
+            (
+              SELECT json_agg(json_build_object(
+                'doc_id', d.doc_id,
+                'doc_name', d.doc_name,
+                'google_drive_file_id', d.google_drive_file_id
+              ))
+              FROM documents d
+              WHERE d.agenda_id = a.agenda_id
+            ) AS documents
           FROM agendas a
           WHERE a.meeting_id = m.meeting_id
-        ) AS agenda
-      FROM meetings m
-      WHERE m.meeting_id = $1
-    )
-    SELECT * FROM meeting_details;
+          ORDER BY a.display_order
+        ) ag
+      ) AS agenda
+    FROM meetings m
+    WHERE m.meeting_id = $1;
   `;
 
   const { rows } = await db.query(query, [id]);
