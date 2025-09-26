@@ -1,67 +1,80 @@
 const db = require('../config/database');
 const googleDriveService = require('../services/googleDriveService');
 const findById = async (id, user) => {
-  // Query 1: Get the main meeting details
-  const meetingQuery = 'SELECT * FROM meetings WHERE meeting_id = $1';
-  const meetingResult = await db.query(meetingQuery, [id]);
-  const meeting = meetingResult.rows[0];
-
-  if (!meeting) return null;
-
-  // Query 2: Get all attendees for the meeting
-  const attendeesQuery = `
-    SELECT u.user_id, u.full_name, ma.status, ma.check_in_time
-    FROM meeting_attendees ma
-    JOIN users u ON ma.user_id = u.user_id
-    WHERE ma.meeting_id = $1
-    ORDER BY u.full_name ASC;
+  const query = `
+    WITH meeting_details AS (
+      SELECT
+        m.*,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'user_id', u.user_id,
+              'full_name', u.full_name,
+              'status', ma.status,
+              'check_in_time', ma.check_in_time
+            ) ORDER BY u.full_name ASC
+          )
+          FROM meeting_attendees ma
+          JOIN users u ON ma.user_id = u.user_id
+          WHERE ma.meeting_id = m.meeting_id
+        ) AS attendees,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'agenda_id', a.agenda_id,
+              'title', a.title,
+              'display_order', a.display_order,
+              'documents', (
+                SELECT COALESCE(json_agg(
+                  json_build_object(
+                    'doc_id', d.doc_id,
+                    'doc_name', d.doc_name,
+                    'google_drive_file_id', d.google_drive_file_id
+                  ) ORDER BY d.doc_id
+                ), '[]'::json)
+                FROM documents d
+                WHERE d.agenda_id = a.agenda_id
+              )
+            ) ORDER BY a.display_order
+          )
+          FROM agendas a
+          WHERE a.meeting_id = m.meeting_id
+        ) AS agenda
+      FROM meetings m
+      WHERE m.meeting_id = $1
+    )
+    SELECT * FROM meeting_details;
   `;
-  const attendeesResult = await db.query(attendeesQuery, [id]);
-  meeting.attendees = attendeesResult.rows;
 
-  // Query 3: Get all agenda items and their documents
-  const agendaQuery = `
-    SELECT a.agenda_id, a.title, a.display_order, d.doc_id, d.doc_name, d.google_drive_file_id
-    FROM agendas a
-    LEFT JOIN documents d ON a.agenda_id = d.agenda_id
-    WHERE a.meeting_id = $1
-    ORDER BY a.display_order, d.doc_id;
-  `;
-  const agendaResult = await db.query(agendaQuery, [id]);
+  const { rows } = await db.query(query, [id]);
+  const meeting = rows[0];
 
-  // Process agenda and documents in application code
-  const agendaMap = new Map();
-  agendaResult.rows.forEach(row => {
-    if (!agendaMap.has(row.agenda_id)) {
-      agendaMap.set(row.agenda_id, {
-        agenda_id: row.agenda_id,
-        title: row.title,
-        display_order: row.display_order,
-        documents: [],
-      });
-    }
-    if (row.doc_id) {
-      agendaMap.get(row.agenda_id).documents.push({
-        doc_id: row.doc_id,
-        doc_name: row.doc_name,
-        google_drive_file_id: row.google_drive_file_id,
-      });
-    }
-  });
-  meeting.agenda = Array.from(agendaMap.values());
+  if (!meeting) {
+    return null;
+  }
 
-  // Authorization check (same as before)
-  if (user.role === 'Admin') return meeting;
+  // Ensure attendees and agenda are never null
+  meeting.attendees = meeting.attendees || [];
+  meeting.agenda = meeting.agenda || [];
 
-  const isAttendee = meeting.attendees && meeting.attendees.some(attendee => attendee && attendee.user_id === user.user_id);
-  if (isAttendee) return meeting;
+  // Authorization check
+  if (user.role === 'Admin') {
+    return meeting;
+  }
+
+  const isAttendee = meeting.attendees.some(attendee => attendee && attendee.user_id === user.user_id);
+  if (isAttendee) {
+    return meeting;
+  }
 
   if (user.role === 'Secretary') {
     const scopeQuery = 'SELECT 1 FROM secretary_scopes WHERE user_id = $1 AND org_id = $2';
     const scopeResult = await db.query(scopeQuery, [user.user_id, meeting.org_id]);
-    if (scopeResult.rows.length > 0) return meeting;
+    if (scopeResult.rows.length > 0) {
+      return meeting;
+    }
   }
-  
+
   return null;
 };
 
