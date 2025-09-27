@@ -3,7 +3,7 @@ const userModel = require('../models/userModel');
 const notificationService = require('../services/notificationService');
 const googleDriveService = require('../services/googleDriveService');
 const qrcode = require('qrcode');
-const cache = require('../services/cacheService');
+const redis = require('../services/redisService');
 
 /**
  * Checks if a user has management permissions for a specific meeting.
@@ -76,11 +76,12 @@ const getMeetingById = async (req, res) => {
   const cacheKey = `meeting-details:${meetingId}`;
 
   try {
-    // 1. Check cache first
-    const cachedMeeting = cache.get(cacheKey);
-    if (cachedMeeting) {
+    // 1. Check Redis cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
       console.log(`Cache HIT for meeting: ${meetingId}`);
-      return res.status(200).json(cachedMeeting);
+      // Data in Redis is a string, so we need to parse it back to JSON
+      return res.status(200).json(JSON.parse(cachedData));
     }
 
     console.log(`Cache MISS for meeting: ${meetingId}`);
@@ -90,10 +91,11 @@ const getMeetingById = async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy cuộc họp hoặc không có quyền truy cập.' });
     }
 
-    // 3. Store in cache before returning
+    // 3. Store in Redis before returning
     const ttl = process.env.CACHE_TTL_MEETING_DETAILS || 300; // 5 minutes default
-    cache.set(cacheKey, meeting, ttl);
-    console.log(`Stored meeting ${meetingId} in cache with TTL: ${ttl}s`);
+    // Use 'EX' for expiration in seconds. Data must be a string.
+    await redis.set(cacheKey, JSON.stringify(meeting), 'EX', ttl);
+    console.log(`Stored meeting ${meetingId} in Redis cache with TTL: ${ttl}s`);
 
     res.status(200).json(meeting);
   } catch (error) {
@@ -108,6 +110,7 @@ const updateMeeting = async (req, res) => {
   const cacheKey = `meeting-details:${meetingId}`;
 
   try {
+    // Note: We don't use the cached version for updates to ensure we have the latest data for permission checks.
     const meeting = await meetingModel.findById(meetingId, user);
     if (!meeting) {
       return res.status(404).json({ message: 'Không tìm thấy cuộc họp hoặc không có quyền truy cập.' });
@@ -120,9 +123,9 @@ const updateMeeting = async (req, res) => {
     }
     const updatedMeeting = await meetingModel.update(meetingId, req.body, user);
 
-    // Invalidate cache
-    cache.del(cacheKey);
-    console.log(`Cache invalidated for meeting: ${meetingId}`);
+    // Invalidate cache in Redis
+    await redis.del(cacheKey);
+    console.log(`Cache invalidated in Redis for meeting: ${meetingId}`);
 
     res.status(200).json({ message: 'Cập nhật cuộc họp thành công!', meeting: updatedMeeting });
   } catch (error) {
@@ -148,9 +151,9 @@ const deleteMeeting = async (req, res) => {
     }
     const deletedMeeting = await meetingModel.remove(meetingId);
 
-    // Invalidate cache
-    cache.del(cacheKey);
-    console.log(`Cache invalidated for meeting: ${meetingId}`);
+    // Invalidate cache in Redis
+    await redis.del(cacheKey);
+    console.log(`Cache invalidated in Redis for meeting: ${meetingId}`);
 
     res.status(200).json({ message: `Đã xóa thành công cuộc họp: ${deletedMeeting.title}` });
   } catch (error) {
