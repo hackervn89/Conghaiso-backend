@@ -10,22 +10,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: SSH into server and deploy backend
+      - name: Deploy Backend
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
           script: |
-            # Vào thư mục code backend
+            echo "🚀 Deploying Backend..."
             cd /var/www/conghaiso/conghaiso-backend
-
-            # Reset code cho sạch
+            
+            echo "🔄 Pulling latest code..."
             git fetch --all
             git reset --hard origin/main
 
-            # Cài dependencies
+            echo "📦 Installing backend dependencies..."
             npm install --production
 
-            # Restart hoặc start lại service với PM2
-            pm2 restart conghaiso-backend || pm2 start npm --name conghaiso-backend -- run start
+            echo "🔄 Reloading backend application with PM2..."
+            # Sử dụng 'reload' để cập nhật không gián đoạn (zero-downtime)
+            # Lệnh sau '||' sẽ tự động chạy nếu app chưa được start lần nào
+            pm2 reload conghaiso-backend || pm2 start npm --name conghaiso-backend -- run start
+            
+            echo "✅ Backend deployed successfully."
