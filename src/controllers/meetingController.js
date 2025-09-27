@@ -3,6 +3,7 @@ const userModel = require('../models/userModel');
 const notificationService = require('../services/notificationService');
 const googleDriveService = require('../services/googleDriveService');
 const qrcode = require('qrcode');
+const cache = require('../services/cacheService');
 
 /**
  * Checks if a user has management permissions for a specific meeting.
@@ -71,11 +72,29 @@ const getMeetings = async (req, res) => {
 };
 
 const getMeetingById = async (req, res) => {
+  const meetingId = req.params.id;
+  const cacheKey = `meeting-details:${meetingId}`;
+
   try {
-    const meeting = await meetingModel.findById(req.params.id, req.user);
+    // 1. Check cache first
+    const cachedMeeting = cache.get(cacheKey);
+    if (cachedMeeting) {
+      console.log(`Cache HIT for meeting: ${meetingId}`);
+      return res.status(200).json(cachedMeeting);
+    }
+
+    console.log(`Cache MISS for meeting: ${meetingId}`);
+    // 2. If miss, go to DB
+    const meeting = await meetingModel.findById(meetingId, req.user);
     if (!meeting) {
       return res.status(404).json({ message: 'Không tìm thấy cuộc họp hoặc không có quyền truy cập.' });
     }
+
+    // 3. Store in cache before returning
+    const ttl = process.env.CACHE_TTL_MEETING_DETAILS || 300; // 5 minutes default
+    cache.set(cacheKey, meeting, ttl);
+    console.log(`Stored meeting ${meetingId} in cache with TTL: ${ttl}s`);
+
     res.status(200).json(meeting);
   } catch (error) {
     console.error('Lỗi khi lấy chi tiết cuộc họp:', error);
@@ -86,6 +105,8 @@ const getMeetingById = async (req, res) => {
 const updateMeeting = async (req, res) => {
   const user = req.user;
   const meetingId = req.params.id;
+  const cacheKey = `meeting-details:${meetingId}`;
+
   try {
     const meeting = await meetingModel.findById(meetingId, user);
     if (!meeting) {
@@ -98,6 +119,11 @@ const updateMeeting = async (req, res) => {
       return res.status(403).json({ message: 'Không có quyền sửa cuộc họp này.' });
     }
     const updatedMeeting = await meetingModel.update(meetingId, req.body, user);
+
+    // Invalidate cache
+    cache.del(cacheKey);
+    console.log(`Cache invalidated for meeting: ${meetingId}`);
+
     res.status(200).json({ message: 'Cập nhật cuộc họp thành công!', meeting: updatedMeeting });
   } catch (error) {
     console.error('Lỗi khi cập nhật cuộc họp:', error);
@@ -108,6 +134,8 @@ const updateMeeting = async (req, res) => {
 const deleteMeeting = async (req, res) => {
   const user = req.user;
   const meetingId = req.params.id;
+  const cacheKey = `meeting-details:${meetingId}`;
+
   try {
     const meeting = await meetingModel.findById(meetingId, user);
     if (!meeting) {
@@ -119,6 +147,11 @@ const deleteMeeting = async (req, res) => {
       return res.status(403).json({ message: 'Không có quyền xóa cuộc họp này.' });
     }
     const deletedMeeting = await meetingModel.remove(meetingId);
+
+    // Invalidate cache
+    cache.del(cacheKey);
+    console.log(`Cache invalidated for meeting: ${meetingId}`);
+
     res.status(200).json({ message: `Đã xóa thành công cuộc họp: ${deletedMeeting.title}` });
   } catch (error) {
     console.error('Lỗi khi xóa cuộc họp:', error);
