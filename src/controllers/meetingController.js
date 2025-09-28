@@ -250,6 +250,8 @@ const updateAttendance = async (req, res) => {
     const { meetingId } = req.params;
     const { userId, status } = req.body;
     const user = req.user;
+    const cacheKey = `meeting-details:${meetingId}`;
+
     try {
         const meeting = await meetingModel.findById(meetingId, user);
         if (!meeting) return res.status(404).json({ message: 'Không tìm thấy cuộc họp.' });
@@ -259,7 +261,35 @@ const updateAttendance = async (req, res) => {
             return res.status(403).json({ message: 'Không có quyền điểm danh.' });
         }
         
+        // 1. Cập nhật vào database (nguồn dữ liệu chính)
         const updatedAttendee = await meetingModel.updateSingleAttendance(meetingId, userId, status);
+
+        // 2. Cập nhật cache thay vì xóa
+        const cachedData = await redis.get(cacheKey);
+        if (cachedData) {
+            try {
+                const meetingData = JSON.parse(cachedData);
+                const attendeeIndex = meetingData.attendees.findIndex(a => a && a.user_id === userId);
+
+                if (attendeeIndex !== -1) {
+                    // Cập nhật trạng thái của đúng người tham dự
+                    meetingData.attendees[attendeeIndex].status = status;
+                    
+                    // Lấy thời gian sống còn lại của cache để bảo toàn
+                    const ttl = await redis.ttl(cacheKey);
+                    
+                    // Ghi đè lại dữ liệu mới vào cache
+                    if (ttl > 0) {
+                        await redis.set(cacheKey, JSON.stringify(meetingData), 'EX', ttl);
+                        console.log(`Cache UPDATED in Redis for meeting: ${meetingId}`);
+                    }
+                }
+            } catch (cacheError) {
+                console.error('Lỗi khi cập nhật Redis cache, sẽ tiến hành xóa cache để đảm bảo tính toàn vẹn:', cacheError);
+                await redis.del(cacheKey);
+            }
+        }
+
         res.status(200).json(updatedAttendee);
     } catch (error) {
         console.error("Lỗi khi cập nhật điểm danh:", error);
