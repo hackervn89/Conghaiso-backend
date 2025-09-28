@@ -8,6 +8,7 @@ const findById = async (id, user) => {
         SELECT json_agg(json_build_object(
           'user_id', u.user_id,
           'full_name', u.full_name,
+          'role', u.role, -- Thêm dòng này
           'status', ma.status,
           'check_in_time', ma.check_in_time
         ))

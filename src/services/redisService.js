@@ -5,7 +5,7 @@ require('dotenv').config();
 const redisConfig = {
   host: process.env.REDIS_HOST || '127.0.0.1',
   port: process.env.REDIS_PORT || 6379,
-  // password: process.env.REDIS_PASSWORD, // Bỏ comment nếu Redis của bạn có mật khẩu
+  password: process.env.REDIS_PASSWORD, // Bỏ comment nếu Redis của bạn có mật khẩu
   maxRetriesPerRequest: 3, // Giảm số lần thử lại để tránh treo yêu cầu quá lâu
 };
 
