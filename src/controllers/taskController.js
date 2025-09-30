@@ -1,4 +1,6 @@
 const taskModel = require('../models/taskModel');
+const userModel = require('../models/userModel');
+const notificationService = require('../services/notificationService');
 const db = require('../config/database'); // Import db để truy vấn
 
 // Helper function to check permissions for modification/deletion
@@ -36,7 +38,22 @@ const canUpdateTaskStatus = async (task, user) => {
 const createTask = async (req, res) => {
     try {
         const creatorId = req.user.user_id;
+        const creatorName = req.user.full_name;
         const newTask = await taskModel.create(req.body, creatorId);
+
+        // Gửi thông báo đẩy cho người nhận việc
+        if (newTask.trackerIds && newTask.trackerIds.length > 0) {
+            const pushTokens = await userModel.findPushTokensByUserIds(newTask.trackerIds);
+            if (pushTokens.length > 0) {
+                notificationService.sendPushNotifications(
+                    pushTokens,
+                    'Công việc mới được giao',
+                    `Bạn nhận được một công việc mới: "${newTask.title}" từ ${creatorName}.`,
+                    { taskId: newTask.task_id }
+                );
+            }
+        }
+
         res.status(201).json(newTask);
     } catch (error) {
         console.error("Lỗi khi tạo công việc:", error);
