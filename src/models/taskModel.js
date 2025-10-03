@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const storageService = require('../services/storageService');
 
 const create = async (taskData, creatorId) => {
     const { 
@@ -30,8 +31,10 @@ const create = async (taskData, creatorId) => {
 
         if (documents && documents.length > 0) {
              for (const doc of documents) {
-                const docQuery = `INSERT INTO task_documents (task_id, doc_name, google_drive_file_id) VALUES ($1, $2, $3);`;
-                await client.query(docQuery, [newTask.task_id, doc.doc_name, doc.google_drive_file_id]);
+                if (doc.name && doc.filePath) {
+                    const docQuery = `INSERT INTO task_documents (task_id, doc_name, file_path) VALUES ($1, $2, $3);`;
+                    await client.query(docQuery, [newTask.task_id, doc.name, doc.filePath]);
+                }
             }
         }
         
@@ -43,6 +46,109 @@ const create = async (taskData, creatorId) => {
     } finally {
         client.release();
     }
+};
+
+const findById = async (taskId) => {
+    const taskQuery = `SELECT * FROM tasks WHERE task_id = $1`;
+    const taskResult = await db.query(taskQuery, [taskId]);
+    const task = taskResult.rows[0];
+
+    if (!task) {
+        return null;
+    }
+
+    const orgsQuery = `SELECT org_id FROM task_assigned_orgs WHERE task_id = $1`;
+    const trackersQuery = `SELECT user_id FROM task_trackers WHERE task_id = $1`;
+    const docsQuery = `SELECT doc_id, doc_name, file_path FROM task_documents WHERE task_id = $1 ORDER BY doc_id`;
+
+    const [orgsResult, trackersResult, docsResult] = await Promise.all([
+        db.query(orgsQuery, [taskId]),
+        db.query(trackersQuery, [taskId]),
+        db.query(docsQuery, [taskId]),
+    ]);
+
+    task.assignedOrgIds = orgsResult.rows.map(r => r.org_id);
+    task.trackerIds = trackersResult.rows.map(r => r.user_id);
+    task.documents = docsResult.rows;
+
+    return task;
+};
+
+const update = async (taskId, taskData) => {
+     const { 
+        title, description, document_ref, is_direct_assignment, 
+        due_date, priority, assignedOrgIds, trackerIds, documents 
+    } = taskData;
+
+    const client = await db.getClient();
+    let docsToDelete = [];
+    try {
+        await client.query('BEGIN');
+        
+        const taskQuery = `
+            UPDATE tasks SET
+                title = $1, description = $2, priority = $3, document_ref = $4,
+                is_direct_assignment = $5, due_date = $6, updated_at = CURRENT_TIMESTAMP
+            WHERE task_id = $7 RETURNING *;
+        `;
+        await client.query(taskQuery, [title, description, priority, document_ref, is_direct_assignment, due_date || null, taskId]);
+
+        await client.query('DELETE FROM task_assigned_orgs WHERE task_id = $1', [taskId]);
+        if (assignedOrgIds && assignedOrgIds.length > 0) {
+            const orgValues = assignedOrgIds.map(orgId => `(${taskId}, ${orgId})`).join(', ');
+            await client.query(`INSERT INTO task_assigned_orgs (task_id, org_id) VALUES ${orgValues};`);
+        }
+
+        await client.query('DELETE FROM task_trackers WHERE task_id = $1', [taskId]);
+        if (trackerIds && trackerIds.length > 0) {
+            const trackerValues = trackerIds.map(userId => `(${taskId}, ${userId})`).join(', ');
+            await client.query(`INSERT INTO task_trackers (task_id, user_id) VALUES ${trackerValues};`);
+        }
+
+        const oldDocsQuery = `SELECT file_path FROM task_documents WHERE task_id = $1 AND file_path IS NOT NULL`;
+        const { rows: oldDocs } = await client.query(oldDocsQuery, [taskId]);
+        docsToDelete = oldDocs;
+
+        await client.query('DELETE FROM task_documents WHERE task_id = $1', [taskId]);
+         if (documents && documents.length > 0) {
+             for (const doc of documents) {
+                if (doc.name && doc.filePath) {
+                    const docQuery = `INSERT INTO task_documents (task_id, doc_name, file_path) VALUES ($1, $2, $3);`;
+                    await client.query(docQuery, [taskId, doc.name, doc.filePath]);
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+
+    if (docsToDelete.length > 0) {
+        console.log(`[Storage] Deleting ${docsToDelete.length} old files for updated task ${taskId}...`);
+        const deletePromises = docsToDelete.map(doc => storageService.deleteFile(doc.file_path));
+        await Promise.all(deletePromises).catch(err => console.error("[Storage] Error during old task file cleanup:", err));
+    }
+
+    return findById(taskId);
+};
+
+const remove = async (taskId) => {
+    const docsQuery = `SELECT file_path FROM task_documents WHERE task_id = $1 AND file_path IS NOT NULL`;
+    const { rows: documentsToDelete } = await db.query(docsQuery, [taskId]);
+
+    const { rows } = await db.query('DELETE FROM tasks WHERE task_id = $1 RETURNING *', [taskId]);
+    const deletedTask = rows[0];
+
+    if (deletedTask && documentsToDelete.length > 0) {
+        console.log(`[Storage] Deleting ${documentsToDelete.length} files for deleted task ${taskId}...`);
+        const deletePromises = documentsToDelete.map(doc => storageService.deleteFile(doc.file_path));
+        await Promise.all(deletePromises);
+    }
+    return deletedTask;
 };
 
 const findAll = async (user, filters) => {
@@ -147,86 +253,6 @@ const findAll = async (user, filters) => {
     return tasks;
 };
 
-
-const findById = async (taskId) => {
-    // Step 1: Get the core task details
-    const taskQuery = `SELECT * FROM tasks WHERE task_id = $1`;
-    const taskResult = await db.query(taskQuery, [taskId]);
-    const task = taskResult.rows[0];
-
-    if (!task) {
-        return null;
-    }
-
-    // Step 2: Fetch related data in parallel for efficiency
-    const orgsQuery = `SELECT org_id FROM task_assigned_orgs WHERE task_id = $1`;
-    const trackersQuery = `SELECT user_id FROM task_trackers WHERE task_id = $1`;
-    const docsQuery = `SELECT doc_id, doc_name, google_drive_file_id FROM task_documents WHERE task_id = $1 ORDER BY doc_id`;
-
-    const [orgsResult, trackersResult, docsResult] = await Promise.all([
-        db.query(orgsQuery, [taskId]),
-        db.query(trackersQuery, [taskId]),
-        db.query(docsQuery, [taskId]),
-    ]);
-
-    // Step 3: Stitch the data together into a single object
-    task.assignedOrgIds = orgsResult.rows.map(r => r.org_id);
-    task.trackerIds = trackersResult.rows.map(r => r.user_id);
-    task.documents = docsResult.rows;
-
-    return task;
-};
-
-const update = async (taskId, taskData) => {
-     const { 
-        title, description, document_ref, is_direct_assignment, 
-        due_date, priority, assignedOrgIds, trackerIds, documents 
-    } = taskData;
-
-    const client = await db.getClient();
-    try {
-        await client.query('BEGIN');
-        
-        const taskQuery = `
-            UPDATE tasks SET
-                title = $1, description = $2, priority = $3, document_ref = $4,
-                is_direct_assignment = $5, due_date = $6, updated_at = CURRENT_TIMESTAMP
-            WHERE task_id = $7 RETURNING *;
-        `;
-        await client.query(taskQuery, [title, description, priority, document_ref, is_direct_assignment, due_date || null, taskId]);
-
-        await client.query('DELETE FROM task_assigned_orgs WHERE task_id = $1', [taskId]);
-        if (assignedOrgIds && assignedOrgIds.length > 0) {
-            const orgValues = assignedOrgIds.map(orgId => `(${taskId}, ${orgId})`).join(', ');
-            await client.query(`INSERT INTO task_assigned_orgs (task_id, org_id) VALUES ${orgValues};`);
-        }
-
-        await client.query('DELETE FROM task_trackers WHERE task_id = $1', [taskId]);
-        if (trackerIds && trackerIds.length > 0) {
-            const trackerValues = trackerIds.map(userId => `(${taskId}, ${userId})`).join(', ');
-            await client.query(`INSERT INTO task_trackers (task_id, user_id) VALUES ${trackerValues};`);
-        }
-
-        // [FIX] Sửa logic cập nhật tài liệu
-        await client.query('DELETE FROM task_documents WHERE task_id = $1', [taskId]);
-         if (documents && documents.length > 0) {
-             for (const doc of documents) {
-                const docQuery = `INSERT INTO task_documents (task_id, doc_name, google_drive_file_id) VALUES ($1, $2, $3);`;
-                // Đảm bảo google_drive_file_id là null nếu nó không được định nghĩa
-                await client.query(docQuery, [taskId, doc.doc_name, doc.google_drive_file_id || null]);
-            }
-        }
-
-        await client.query('COMMIT');
-        return findById(taskId);
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
-};
-
 const updateStatus = async (taskId, status, completed_at = null) => {
     const query = `
         UPDATE tasks SET status = $1, completed_at = $2, updated_at = CURRENT_TIMESTAMP
@@ -236,13 +262,7 @@ const updateStatus = async (taskId, status, completed_at = null) => {
     return rows[0];
 };
 
-const remove = async (taskId) => {
-    const { rows } = await db.query('DELETE FROM tasks WHERE task_id = $1 RETURNING *', [taskId]);
-    return rows[0];
-};
-
 const getTasksSummary = async (user) => {
-    // Tạo các phần truy vấn cơ sở
     let baseQuery = `
         FROM tasks t
     `;
@@ -250,7 +270,6 @@ const getTasksSummary = async (user) => {
     let userWhereClause = '';
     const params = [];
 
-    // Thêm bộ lọc theo người dùng nếu không phải Admin
     if (user.role !== 'Admin') {
         userJoins = `
             LEFT JOIN task_trackers tt ON t.task_id = tt.task_id
@@ -259,7 +278,6 @@ const getTasksSummary = async (user) => {
         params.push(user.user_id);
     }
 
-    // Sử dụng một truy vấn duy nhất với COUNT và FILTER để có hiệu suất tốt hơn
     const finalQuery = `
         SELECT 
             COUNT(DISTINCT t.task_id) FILTER (WHERE t.due_date < CURRENT_TIMESTAMP AND t.status != 'completed' ${userWhereClause}) AS overdue_tasks,
@@ -278,7 +296,6 @@ const getTasksSummary = async (user) => {
         };
     } catch (error) {
         console.error("Lỗi khi lấy tóm tắt công việc:", error);
-        // Trả về giá trị mặc định trong trường hợp lỗi
         return {
             overdueTasks: 0,
             ongoingTasks: 0
@@ -296,4 +313,3 @@ module.exports = {
     remove,
     getTasksSummary,
 };
-

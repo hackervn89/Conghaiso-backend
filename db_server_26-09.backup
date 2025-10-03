@@ -1,0 +1,1514 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict VzSYGUcJbF0U0sv41VC5bAshdHJSPoP3adIidxWduacaNLrUx3XcC7LKsMmdFhC
+
+-- Dumped from database version 17.6
+-- Dumped by pg_dump version 17.6
+
+-- Started on 2025-10-03 20:42:10
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- TOC entry 868 (class 1247 OID 33661)
+-- Name: attendance_status; Type: TYPE; Schema: public; Owner: hoangviet
+--
+
+CREATE TYPE public.attendance_status AS ENUM (
+    'pending',
+    'present',
+    'absent',
+    'absent_with_reason'
+);
+
+
+ALTER TYPE public.attendance_status OWNER TO hoangviet;
+
+--
+-- TOC entry 871 (class 1247 OID 33670)
+-- Name: task_priority; Type: TYPE; Schema: public; Owner: hoangviet
+--
+
+CREATE TYPE public.task_priority AS ENUM (
+    'normal',
+    'important',
+    'urgent'
+);
+
+
+ALTER TYPE public.task_priority OWNER TO hoangviet;
+
+--
+-- TOC entry 874 (class 1247 OID 33678)
+-- Name: task_status; Type: TYPE; Schema: public; Owner: hoangviet
+--
+
+CREATE TYPE public.task_status AS ENUM (
+    'new',
+    'in_progress',
+    'completed'
+);
+
+
+ALTER TYPE public.task_status OWNER TO hoangviet;
+
+--
+-- TOC entry 877 (class 1247 OID 33686)
+-- Name: user_role; Type: TYPE; Schema: public; Owner: hoangviet
+--
+
+CREATE TYPE public.user_role AS ENUM (
+    'Admin',
+    'Secretary',
+    'Attendee'
+);
+
+
+ALTER TYPE public.user_role OWNER TO hoangviet;
+
+--
+-- TOC entry 238 (class 1255 OID 33693)
+-- Name: build_org_tree(integer); Type: FUNCTION; Schema: public; Owner: hoangviet
+--
+
+CREATE FUNCTION public.build_org_tree(parent_org_id integer DEFAULT NULL::integer) RETURNS jsonb
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    result jsonb;
+BEGIN
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'org_id', o.org_id,
+            'org_name', o.org_name,
+            'parent_id', o.parent_id,
+            'display_order', o.display_order,
+            'children', build_org_tree(o.org_id)
+        ) ORDER BY o.display_order ASC NULLS LAST, o.org_name ASC
+    )
+    INTO result
+    FROM organizations o
+    WHERE o.parent_id IS NOT DISTINCT FROM parent_org_id;
+
+    RETURN COALESCE(result, '[]'::jsonb);
+END;
+$$;
+
+
+ALTER FUNCTION public.build_org_tree(parent_org_id integer) OWNER TO hoangviet;
+
+--
+-- TOC entry 250 (class 1255 OID 33694)
+-- Name: build_org_tree_with_users(integer); Type: FUNCTION; Schema: public; Owner: hoangviet
+--
+
+CREATE FUNCTION public.build_org_tree_with_users(parent_org_id integer DEFAULT NULL::integer) RETURNS jsonb
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    result jsonb;
+BEGIN
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'org_id', o.org_id,
+            'org_name', o.org_name,
+            'parent_id', o.parent_id,
+            'display_order', o.display_order,
+            'users', COALESCE(
+                (SELECT jsonb_agg(jsonb_build_object('user_id', u.user_id, 'full_name', u.full_name) ORDER BY u.full_name)
+                 FROM user_organizations uo
+                 JOIN users u ON uo.user_id = u.user_id
+                 WHERE uo.org_id = o.org_id),
+                '[]'::jsonb
+            ),
+            'children', build_org_tree_with_users(o.org_id)
+        ) ORDER BY o.display_order ASC NULLS LAST, o.org_name ASC
+    )
+    INTO result
+    FROM organizations o
+    WHERE o.parent_id IS NOT DISTINCT FROM parent_org_id;
+
+    RETURN COALESCE(result, '[]'::jsonb);
+END;
+$$;
+
+
+ALTER FUNCTION public.build_org_tree_with_users(parent_org_id integer) OWNER TO hoangviet;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- TOC entry 217 (class 1259 OID 33695)
+-- Name: agendas; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.agendas (
+    agenda_id integer NOT NULL,
+    meeting_id integer NOT NULL,
+    title text NOT NULL,
+    display_order integer NOT NULL
+);
+
+
+ALTER TABLE public.agendas OWNER TO hoangviet;
+
+--
+-- TOC entry 218 (class 1259 OID 33700)
+-- Name: agendas_agenda_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.agendas_agenda_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.agendas_agenda_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5034 (class 0 OID 0)
+-- Dependencies: 218
+-- Name: agendas_agenda_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.agendas_agenda_id_seq OWNED BY public.agendas.agenda_id;
+
+
+--
+-- TOC entry 219 (class 1259 OID 33701)
+-- Name: documents; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.documents (
+    doc_id integer NOT NULL,
+    agenda_id integer NOT NULL,
+    doc_name character varying(255) NOT NULL,
+    google_drive_file_id character varying(255) NOT NULL
+);
+
+
+ALTER TABLE public.documents OWNER TO hoangviet;
+
+--
+-- TOC entry 220 (class 1259 OID 33706)
+-- Name: documents_doc_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.documents_doc_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.documents_doc_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5035 (class 0 OID 0)
+-- Dependencies: 220
+-- Name: documents_doc_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.documents_doc_id_seq OWNED BY public.documents.doc_id;
+
+
+--
+-- TOC entry 221 (class 1259 OID 33707)
+-- Name: meeting_attendees; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.meeting_attendees (
+    meeting_id integer NOT NULL,
+    user_id integer NOT NULL,
+    status public.attendance_status DEFAULT 'pending'::public.attendance_status NOT NULL,
+    check_in_time timestamp with time zone,
+    qr_code_token text
+);
+
+
+ALTER TABLE public.meeting_attendees OWNER TO hoangviet;
+
+--
+-- TOC entry 222 (class 1259 OID 33713)
+-- Name: meetings; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.meetings (
+    meeting_id integer NOT NULL,
+    title text NOT NULL,
+    location text,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone,
+    creator_id integer,
+    org_id integer,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    google_drive_folder_id character varying(255),
+    chairperson_id integer,
+    meeting_secretary_id integer,
+    qr_code_token text
+);
+
+
+ALTER TABLE public.meetings OWNER TO hoangviet;
+
+--
+-- TOC entry 223 (class 1259 OID 33720)
+-- Name: meetings_meeting_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.meetings_meeting_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.meetings_meeting_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5036 (class 0 OID 0)
+-- Dependencies: 223
+-- Name: meetings_meeting_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.meetings_meeting_id_seq OWNED BY public.meetings.meeting_id;
+
+
+--
+-- TOC entry 224 (class 1259 OID 33721)
+-- Name: organizations; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.organizations (
+    org_id integer NOT NULL,
+    org_name character varying(255) NOT NULL,
+    parent_id integer,
+    display_order integer
+);
+
+
+ALTER TABLE public.organizations OWNER TO hoangviet;
+
+--
+-- TOC entry 225 (class 1259 OID 33724)
+-- Name: organizations_org_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.organizations_org_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.organizations_org_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5037 (class 0 OID 0)
+-- Dependencies: 225
+-- Name: organizations_org_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.organizations_org_id_seq OWNED BY public.organizations.org_id;
+
+
+--
+-- TOC entry 226 (class 1259 OID 33725)
+-- Name: push_subscriptions; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.push_subscriptions (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    subscription_type character varying(10) NOT NULL,
+    subscription_object jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.push_subscriptions OWNER TO hoangviet;
+
+--
+-- TOC entry 227 (class 1259 OID 33731)
+-- Name: push_subscriptions_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.push_subscriptions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.push_subscriptions_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5038 (class 0 OID 0)
+-- Dependencies: 227
+-- Name: push_subscriptions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.push_subscriptions_id_seq OWNED BY public.push_subscriptions.id;
+
+
+--
+-- TOC entry 228 (class 1259 OID 33732)
+-- Name: secretary_scopes; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.secretary_scopes (
+    user_id integer NOT NULL,
+    org_id integer NOT NULL
+);
+
+
+ALTER TABLE public.secretary_scopes OWNER TO hoangviet;
+
+--
+-- TOC entry 229 (class 1259 OID 33735)
+-- Name: task_assigned_orgs; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.task_assigned_orgs (
+    task_id integer NOT NULL,
+    org_id integer NOT NULL
+);
+
+
+ALTER TABLE public.task_assigned_orgs OWNER TO hoangviet;
+
+--
+-- TOC entry 230 (class 1259 OID 33738)
+-- Name: task_documents; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.task_documents (
+    doc_id integer NOT NULL,
+    task_id integer NOT NULL,
+    doc_name character varying(255) NOT NULL,
+    google_drive_file_id character varying(255) NOT NULL
+);
+
+
+ALTER TABLE public.task_documents OWNER TO hoangviet;
+
+--
+-- TOC entry 231 (class 1259 OID 33743)
+-- Name: task_documents_doc_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.task_documents_doc_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.task_documents_doc_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5039 (class 0 OID 0)
+-- Dependencies: 231
+-- Name: task_documents_doc_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.task_documents_doc_id_seq OWNED BY public.task_documents.doc_id;
+
+
+--
+-- TOC entry 232 (class 1259 OID 33744)
+-- Name: task_trackers; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.task_trackers (
+    task_id integer NOT NULL,
+    user_id integer NOT NULL
+);
+
+
+ALTER TABLE public.task_trackers OWNER TO hoangviet;
+
+--
+-- TOC entry 233 (class 1259 OID 33747)
+-- Name: tasks; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.tasks (
+    task_id integer NOT NULL,
+    title text NOT NULL,
+    description text,
+    creator_id integer,
+    status public.task_status DEFAULT 'new'::public.task_status NOT NULL,
+    priority public.task_priority DEFAULT 'normal'::public.task_priority NOT NULL,
+    document_ref character varying(255),
+    is_direct_assignment boolean DEFAULT false,
+    due_date timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.tasks OWNER TO hoangviet;
+
+--
+-- TOC entry 234 (class 1259 OID 33757)
+-- Name: tasks_task_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.tasks_task_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.tasks_task_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5040 (class 0 OID 0)
+-- Dependencies: 234
+-- Name: tasks_task_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.tasks_task_id_seq OWNED BY public.tasks.task_id;
+
+
+--
+-- TOC entry 235 (class 1259 OID 33758)
+-- Name: user_organizations; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.user_organizations (
+    user_id integer NOT NULL,
+    org_id integer NOT NULL
+);
+
+
+ALTER TABLE public.user_organizations OWNER TO hoangviet;
+
+--
+-- TOC entry 236 (class 1259 OID 33761)
+-- Name: users; Type: TABLE; Schema: public; Owner: hoangviet
+--
+
+CREATE TABLE public.users (
+    user_id integer NOT NULL,
+    full_name character varying(255) NOT NULL,
+    username character varying(100) NOT NULL,
+    email character varying(255) NOT NULL,
+    password_hash character varying(255) NOT NULL,
+    "position" character varying(255),
+    role public.user_role NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    push_token character varying(255)
+);
+
+
+ALTER TABLE public.users OWNER TO hoangviet;
+
+--
+-- TOC entry 237 (class 1259 OID 33768)
+-- Name: users_user_id_seq; Type: SEQUENCE; Schema: public; Owner: hoangviet
+--
+
+CREATE SEQUENCE public.users_user_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.users_user_id_seq OWNER TO hoangviet;
+
+--
+-- TOC entry 5041 (class 0 OID 0)
+-- Dependencies: 237
+-- Name: users_user_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: hoangviet
+--
+
+ALTER SEQUENCE public.users_user_id_seq OWNED BY public.users.user_id;
+
+
+--
+-- TOC entry 4766 (class 2604 OID 33769)
+-- Name: agendas agenda_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.agendas ALTER COLUMN agenda_id SET DEFAULT nextval('public.agendas_agenda_id_seq'::regclass);
+
+
+--
+-- TOC entry 4767 (class 2604 OID 33770)
+-- Name: documents doc_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.documents ALTER COLUMN doc_id SET DEFAULT nextval('public.documents_doc_id_seq'::regclass);
+
+
+--
+-- TOC entry 4769 (class 2604 OID 33771)
+-- Name: meetings meeting_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meetings ALTER COLUMN meeting_id SET DEFAULT nextval('public.meetings_meeting_id_seq'::regclass);
+
+
+--
+-- TOC entry 4772 (class 2604 OID 33772)
+-- Name: organizations org_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.organizations ALTER COLUMN org_id SET DEFAULT nextval('public.organizations_org_id_seq'::regclass);
+
+
+--
+-- TOC entry 4773 (class 2604 OID 33773)
+-- Name: push_subscriptions id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.push_subscriptions ALTER COLUMN id SET DEFAULT nextval('public.push_subscriptions_id_seq'::regclass);
+
+
+--
+-- TOC entry 4775 (class 2604 OID 33774)
+-- Name: task_documents doc_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_documents ALTER COLUMN doc_id SET DEFAULT nextval('public.task_documents_doc_id_seq'::regclass);
+
+
+--
+-- TOC entry 4776 (class 2604 OID 33775)
+-- Name: tasks task_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.tasks ALTER COLUMN task_id SET DEFAULT nextval('public.tasks_task_id_seq'::regclass);
+
+
+--
+-- TOC entry 4782 (class 2604 OID 33776)
+-- Name: users user_id; Type: DEFAULT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.users ALTER COLUMN user_id SET DEFAULT nextval('public.users_user_id_seq'::regclass);
+
+
+--
+-- TOC entry 5007 (class 0 OID 33695)
+-- Dependencies: 217
+-- Data for Name: agendas; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.agendas (agenda_id, meeting_id, title, display_order) FROM stdin;
+16	90	Ha	1
+\.
+
+
+--
+-- TOC entry 5009 (class 0 OID 33701)
+-- Dependencies: 219
+-- Data for Name: documents; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.documents (doc_id, agenda_id, doc_name, google_drive_file_id) FROM stdin;
+\.
+
+
+--
+-- TOC entry 5011 (class 0 OID 33707)
+-- Dependencies: 221
+-- Data for Name: meeting_attendees; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.meeting_attendees (meeting_id, user_id, status, check_in_time, qr_code_token) FROM stdin;
+90	8	pending	\N	\N
+90	1	pending	\N	\N
+90	27	pending	\N	\N
+90	2	pending	\N	\N
+90	7	pending	\N	\N
+\.
+
+
+--
+-- TOC entry 5012 (class 0 OID 33713)
+-- Dependencies: 222
+-- Data for Name: meetings; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.meetings (meeting_id, title, location, start_time, end_time, creator_id, org_id, created_at, updated_at, google_drive_folder_id, chairperson_id, meeting_secretary_id, qr_code_token) FROM stdin;
+90	Test phân quyền	asdasdd	2025-09-26 16:38:00+07	\N	1	1	2025-09-23 16:40:27.272716+07	2025-09-23 16:40:27.272716+07	1qtoBtRzzP2b3FXDTsCWOpMlLZ0SCvx0M	\N	\N	d6aaab71969d55276fc4917cda6899c7
+\.
+
+
+--
+-- TOC entry 5014 (class 0 OID 33721)
+-- Dependencies: 224
+-- Data for Name: organizations; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.organizations (org_id, org_name, parent_id, display_order) FROM stdin;
+18	Văn phòng Đảng uỷ	1	16
+19	Ban Xây dựng Đảng	1	15
+20	Uỷ ban kiểm tra Đảng uỷ	1	14
+21	Ban Chấp hành Đảng uỷ	1	13
+22	Ban Thường vụ Đảng uỷ	1	12
+23	Thường trực Đảng uỷ	1	11
+24	Thường trực HĐND	4	41
+25	Ban Pháp chế HĐND	4	42
+26	Ban Ngân sách HĐND	4	43
+27	Phòng Kinh tế	5	10
+28	Phòng Văn hoá - Xã hội	5	10
+29	Trung tâm phục vụ Hành chính công	5	10
+30	Văn phòng HĐND - UBND	5	10
+31	Lãnh đạo UBND	5	10
+5	Uỷ ban nhân dân xã	\N	3
+4	Hội đồng nhân dân xã	\N	2
+1	Đảng uỷ xã	\N	1
+32	Uỷ ban MTTQ Việt Nam xã	\N	4
+33	Chi bộ trực thuộc	\N	5
+34	Đoàn Thanh niên xã	32	10
+\.
+
+
+--
+-- TOC entry 5016 (class 0 OID 33725)
+-- Dependencies: 226
+-- Data for Name: push_subscriptions; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.push_subscriptions (id, user_id, subscription_type, subscription_object, created_at) FROM stdin;
+1	2	expo	{"token": "ExponentPushToken[cnL9NKMJd5aiu43bvKHXwA]"}	2025-09-17 16:32:38.163873+07
+2	7	expo	{"token": "ExponentPushToken[YdlfEtHbaGs9wlDPiu4XGf]"}	2025-09-17 16:32:38.163873+07
+3	27	expo	{"token": "ExponentPushToken[kER08UPud3dgvxUASzLagV]"}	2025-09-17 16:32:38.163873+07
+\.
+
+
+--
+-- TOC entry 5018 (class 0 OID 33732)
+-- Dependencies: 228
+-- Data for Name: secretary_scopes; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.secretary_scopes (user_id, org_id) FROM stdin;
+2	1
+\.
+
+
+--
+-- TOC entry 5019 (class 0 OID 33735)
+-- Dependencies: 229
+-- Data for Name: task_assigned_orgs; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.task_assigned_orgs (task_id, org_id) FROM stdin;
+43	19
+44	19
+45	19
+46	32
+47	19
+48	19
+49	34
+50	5
+51	19
+52	5
+53	4
+53	19
+53	32
+53	20
+\.
+
+
+--
+-- TOC entry 5020 (class 0 OID 33738)
+-- Dependencies: 230
+-- Data for Name: task_documents; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.task_documents (doc_id, task_id, doc_name, google_drive_file_id) FROM stdin;
+\.
+
+
+--
+-- TOC entry 5022 (class 0 OID 33744)
+-- Dependencies: 232
+-- Data for Name: task_trackers; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.task_trackers (task_id, user_id) FROM stdin;
+43	16
+44	16
+45	16
+46	16
+47	16
+48	16
+49	16
+50	15
+51	16
+52	15
+53	15
+\.
+
+
+--
+-- TOC entry 5023 (class 0 OID 33747)
+-- Dependencies: 233
+-- Data for Name: tasks; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.tasks (task_id, title, description, creator_id, status, priority, document_ref, is_direct_assignment, due_date, completed_at, created_at, updated_at) FROM stdin;
+43	Quían triệt Quy định 337-QĐ/TW về việc gửi, nhận văn bản điện tử trên mạng thông tin diện rộng của Đảng và mạng Internet	Giao Ban Xây dựng Đảng xây dựng, tham mưu Ban Thường vụ Đảng uỷ Kế hoạch tuyên truyền, quán triệt, triển khai thực hiện nghiêm các nội dung tại Quy định số 338-QĐ/TW bằng hình thức phù hợp	1	new	normal	06/ĐU	f	2025-09-30 00:00:00+07	\N	2025-09-26 14:46:34.526894+07	2025-09-26 14:46:34.526894+07
+44	Kế hoạch tuyên truyền trước, trong và sau Đại hội Mặt trận TQ Việt Nam xã	Giao Ban Xây dựng Đảng tham mưu Ban Thường vụ Đảng uỷ Kế hoạch tuyên truyền trước, trong và sau Đại hội Mặt trận Tổ quốc Việt Nam xã	1	new	normal	15-CV/ĐU	f	2025-09-22 00:00:00+07	\N	2025-09-26 14:48:15.859298+07	2025-09-26 14:48:15.859298+07
+45	Lập hồ sơ Đại hội	Lập hồ sơ và nộp lưu hồ sơ về Lưu trữ Văn phòng Đảng uỷ quá trình chuẩn bị báo cáo chính trị, báo cáo kiểm điểm của cấp ủy, dự thảo nghị quyết đại hội và các tài liệu khác trình đại hội; hồ sơ hoạt động của tiểu ban	1	new	normal	17-CV/ĐU	f	2025-09-08 00:00:00+07	\N	2025-09-26 14:56:12.074257+07	2025-09-26 14:56:12.074257+07
+46	Triển khai Kế hoạch số 16/KH-MTTQ-UB, ngày 09/9/2025 của của Ủy ban Mặt trận Tổ quốc Việt Nam tỉnh về triển khai nội dung giám sát 6 tháng cuối năm 2025	Ban hành Kế hoạch giám sát 6 tháng cuối năm 2025 theo Kế hoạch số số 16/KH-MTTQ-UB, ngày 09/9/2025 của của Ủy ban Mặt trận Tổ quốc Việt Nam tỉnh về triển khai nội dung giám sát 6 tháng cuối năm 2025	1	new	normal		f	2025-09-30 00:00:00+07	\N	2025-09-26 15:01:46.390563+07	2025-09-26 15:01:46.390563+07
+47	Sắp xếp tổ chức bộ máy Hội Chử thập đỏ	Ban Xây dựng Đảng:  phối hợp với Uỷ ban Mặt trận Tổ quốc Việt Nam xã, Uỷ ban nhân dân xã khẩn trương rà soát nhân sự lãnh đạo, Ban Thường vụ, Ban Chấp hành, Ban Kiểm tra Hội Chữ thập đỏ xã cũ; tham mưu Ban Thường vụ Đảng uỷ sắp xếp, bố trí nhân sự làm Chủ tịch Hội Chữ Thập đỏ xã phù hợp với tình hình tại địa phương	1	new	normal	79-CV/ĐU	f	2025-09-22 00:00:00+07	\N	2025-09-26 15:04:11.285055+07	2025-09-26 15:04:11.285055+07
+48	Tham mưu văn bản chỉ đạo tổ chức Đại hội Đoàn Thanh niên	Tham mưu Ban Thường vụ Đảng uỷ văn bản chỉ đạo tổ chức Đại hội Đoàn Thanh niên cộng sản Hồ Chí Minh xã Công Hải	1	new	normal	84-CV/ĐU	f	2025-10-22 00:00:00+07	\N	2025-09-26 15:09:28.964997+07	2025-09-26 15:09:28.964997+07
+49	Xây dựng Kế hoạch Đại hội Đoàn Thanh niên xã	Phối hợp với Ban Xây dựng Đảng triển khai xây dựng, ban hành Kế hoạch tổ chức Đại hội Đoàn Thanh niên xã và các văn bản phục vụ tổ chức Đại hội	1	new	normal	84-CV/ĐU	f	2025-10-28 00:00:00+07	\N	2025-09-26 15:10:52.944414+07	2025-09-26 15:10:52.944414+07
+50	Triển khai Kế hoạch số 294-KH/TU về thực hiện phong trào Bình dân học vụ số	Giao Đảng uỷ UBND xã tham mưu Ban Thường vụ Đảng uỷ Kế hoạch triển khai thực hiện Kế hoạch số 294-KH/TU về thực hiện phong trào Bình dân học vụ số	1	new	normal		f	2025-08-20 00:00:00+07	\N	2025-09-26 15:19:19.871484+07	2025-09-26 15:19:19.871484+07
+51	Xây dựng Chương trình hành động thực hiện Nghị quyết Đại hội	Chủ trì phối hợp với các cơ quan liên quan tham mưu Đảng ủy xã Chương trình hành động thực hiện Nghị quyết Đại hội đại biểu Đảng bộ xã lần thứ I, nhiệm kỳ 2025-2030 trên các lĩnh vực xây dựng Đảng, hệ thống chính trị, công tác kiểm tra giám sát, công tác dân vận, hoạt động mặt trận và các tổ chức chính trị-xã hội...	1	new	normal	31-CV/ĐU	f	2025-08-25 00:00:00+07	\N	2025-09-26 15:59:55.576124+07	2025-09-26 15:59:55.576124+07
+52	Đề xuất nội dung Chương trình công tác toàn khoá của Ban Chấp hành	Đảng uỷ UBND xã chỉ đạo UBND xã chỉ đạo các phòng chuyên môn triển khai thực hiện và tổng hợp chung các nội dung đề xuất của UBND xã vào Chương trình công tác toàn khoá của Ban Chấp hành, Ban thường vụ Đảng uỷ nhiệm kỳ 2025 - 2030	1	new	normal	31-CV/ĐU	f	2025-08-29 00:00:00+07	\N	2025-09-26 16:03:45.638405+07	2025-09-26 16:03:45.638405+07
+53	Đề xuất nội dung Chương trình công tác toàn khoá của Ban Chấp hành	Đề xuất nội dung Chương trình công tác toàn khoá của Ban Chấp hành, Ban Thường vụ Đảng uỷ nhiệm kỳ 2025 - 2030	1	new	normal	31-CV/ĐU	f	2025-08-29 00:00:00+07	\N	2025-09-26 16:06:30.906665+07	2025-09-26 16:06:30.906665+07
+\.
+
+
+--
+-- TOC entry 5025 (class 0 OID 33758)
+-- Dependencies: 235
+-- Data for Name: user_organizations; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.user_organizations (user_id, org_id) FROM stdin;
+1	1
+3	4
+3	5
+9	18
+10	18
+10	21
+11	18
+12	18
+13	18
+15	18
+16	18
+17	22
+17	21
+17	19
+18	19
+18	21
+19	19
+20	19
+21	19
+22	19
+8	23
+8	20
+8	22
+8	21
+7	23
+7	22
+7	21
+7	24
+23	20
+23	21
+24	20
+25	20
+26	20
+2	1
+2	23
+2	22
+2	21
+2	18
+27	23
+27	22
+27	21
+27	31
+1	21
+1	23
+1	24
+1	25
+1	5
+1	4
+1	22
+1	18
+\.
+
+
+--
+-- TOC entry 5026 (class 0 OID 33761)
+-- Dependencies: 236
+-- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: hoangviet
+--
+
+COPY public.users (user_id, full_name, username, email, password_hash, "position", role, created_at, updated_at, push_token) FROM stdin;
+3	Văn thư HĐND-UBND	vanthuhdnd	vt.hdndubnd@example.com	$2b$10$ZuVIkOAzT0ZeRM76AuqWc.EOq8eJhnW.U7yJLdSIK5cGiyyi7Ru2S	Văn thư	Secretary	2025-09-03 11:45:25.820073+07	2025-09-08 16:39:52.145087+07	\N
+2	Văn thư Đảng uỷ	vanthudanguy	vt.du@example.com	$2b$10$ZuVIkOAzT0ZeRM76AuqWc.EOq8eJhnW.U7yJLdSIK5cGiyyi7Ru2S	Văn thư	Secretary	2025-09-03 11:45:25.820073+07	2025-09-08 22:36:27.174347+07	ExponentPushToken[cnL9NKMJd5aiu43bvKHXwA]
+10	Nguyễn Đăng Quang	ndquang	dangquang@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	ĐUV - Chánh Văn phòng Đảng uỷ	Attendee	2025-09-08 17:09:21.848994+07	2025-09-08 17:09:21.848994+07	\N
+11	Mai Duy Bàng	mdbang	bang@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Phó Chánh Văn phòng Đảng uỷ	Attendee	2025-09-08 17:09:54.436935+07	2025-09-08 17:09:54.436935+07	\N
+12	Lê Thị Bích Thuỷ	ltbthuy	thuy@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên VPĐU	Attendee	2025-09-08 17:12:28.240723+07	2025-09-08 17:12:28.240723+07	\N
+13	Hồ Thị Thuý Nhi	httnhi	nhi@gmial.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 17:13:01.484242+07	2025-09-08 17:13:01.484242+07	\N
+17	Phạm Cao Thuận	pcthuan	thuan@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	UVTV - Trưởng Ban xây dựng Đảng	Attendee	2025-09-08 17:18:26.460642+07	2025-09-08 17:18:26.460642+07	\N
+18	Sầm Văn Tim	svtim	tim@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	ĐUV - Phó Trưởng Ban xây dựng Đảng	Attendee	2025-09-08 17:19:06.407882+07	2025-09-08 17:19:06.407882+07	\N
+19	Katơr Minh	kminh	minh@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 20:34:03.455887+07	2025-09-08 20:34:03.455887+07	\N
+20	Đoàn Quang Vinh	dqvinh	vinh@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 20:34:26.854223+07	2025-09-08 20:34:26.854223+07	\N
+21	Trần Thị Bạch Mai	ttbmai	mai@123	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 20:37:46.528993+07	2025-09-08 20:37:46.528993+07	\N
+22	Katơr Thị Duyên	ktduyen	kduyen@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 20:38:25.125167+07	2025-09-08 20:38:25.125167+07	\N
+8	Nguyễn Xuân Hoàng 	nxhoang	hoang@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Phó Bí thư Thường trực Đảng uỷ	Attendee	2025-09-08 09:59:43.68645+07	2025-09-08 21:19:43.323794+07	\N
+23	Đường Sĩ Nguyên	dsnguyen	nguyen@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Phó Chủ nhiệm UBKT	Attendee	2025-09-08 21:20:51.182322+07	2025-09-08 21:20:51.182322+07	\N
+24	Phan Thị Ái Hằng	ptahang	hang@gmaic	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 21:21:20.598077+07	2025-09-08 21:21:20.598077+07	\N
+25	Trịnh Thị Thuý Lài	tttlai	lai@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 21:21:44.263951+07	2025-09-08 21:21:44.263951+07	\N
+26	Chamaléa Xoa	cxoa	xoa@gmial.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 21:22:15.632541+07	2025-09-08 21:22:15.632541+07	\N
+15	Mai Thị Thuỷ	mtthuy	thuy1@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 17:13:36.219615+07	2025-09-08 17:13:36.219615+07	\N
+9	Ngô Hoàng Việt	hoangviet	hoangviet.vietlong@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Admin	2025-09-08 17:08:31.929505+07	2025-09-08 17:08:31.929505+07	\N
+27	Trương Minh Vũ	tmvu	truongminhvu@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Phó Bí thư - Chủ tịch UBND xã	Attendee	2025-09-09 12:20:15.21902+07	2025-09-09 12:23:34.549231+07	ExponentPushToken[kER08UPud3dgvxUASzLagV]
+16	Katơr Vế	kve	katorve@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Chuyên viên	Attendee	2025-09-08 17:14:11.96631+07	2025-09-08 17:14:11.96631+07	\N
+7	Vũ Thị Thuỳ Trang	vtttrang	trang@gmail.com	$2a$10$Pv1gbZnQJ3MZnxfRuF3iPObI/UpdQN9/PCux4MXDMUtRk/jQkD5gq	Bí thư Đảng uỷ	Attendee	2025-09-08 09:59:07.766798+07	2025-09-08 21:19:57.602374+07	\N
+1	Quản trị viên Hệ thống	admin	admin@example.com	$2b$10$ZuVIkOAzT0ZeRM76AuqWc.EOq8eJhnW.U7yJLdSIK5cGiyyi7Ru2S	Quản trị viên	Admin	2025-09-03 11:45:25.820073+07	2025-09-03 11:45:25.820073+07	\N
+\.
+
+
+--
+-- TOC entry 5042 (class 0 OID 0)
+-- Dependencies: 218
+-- Name: agendas_agenda_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.agendas_agenda_id_seq', 16, true);
+
+
+--
+-- TOC entry 5043 (class 0 OID 0)
+-- Dependencies: 220
+-- Name: documents_doc_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.documents_doc_id_seq', 17, true);
+
+
+--
+-- TOC entry 5044 (class 0 OID 0)
+-- Dependencies: 223
+-- Name: meetings_meeting_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.meetings_meeting_id_seq', 90, true);
+
+
+--
+-- TOC entry 5045 (class 0 OID 0)
+-- Dependencies: 225
+-- Name: organizations_org_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.organizations_org_id_seq', 34, true);
+
+
+--
+-- TOC entry 5046 (class 0 OID 0)
+-- Dependencies: 227
+-- Name: push_subscriptions_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.push_subscriptions_id_seq', 3, true);
+
+
+--
+-- TOC entry 5047 (class 0 OID 0)
+-- Dependencies: 231
+-- Name: task_documents_doc_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.task_documents_doc_id_seq', 7, true);
+
+
+--
+-- TOC entry 5048 (class 0 OID 0)
+-- Dependencies: 234
+-- Name: tasks_task_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.tasks_task_id_seq', 53, true);
+
+
+--
+-- TOC entry 5049 (class 0 OID 0)
+-- Dependencies: 237
+-- Name: users_user_id_seq; Type: SEQUENCE SET; Schema: public; Owner: hoangviet
+--
+
+SELECT pg_catalog.setval('public.users_user_id_seq', 28, true);
+
+
+--
+-- TOC entry 4786 (class 2606 OID 33778)
+-- Name: agendas agendas_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.agendas
+    ADD CONSTRAINT agendas_pkey PRIMARY KEY (agenda_id);
+
+
+--
+-- TOC entry 4789 (class 2606 OID 33780)
+-- Name: documents documents_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.documents
+    ADD CONSTRAINT documents_pkey PRIMARY KEY (doc_id);
+
+
+--
+-- TOC entry 4794 (class 2606 OID 33782)
+-- Name: meeting_attendees meeting_attendees_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meeting_attendees
+    ADD CONSTRAINT meeting_attendees_pkey PRIMARY KEY (meeting_id, user_id);
+
+
+--
+-- TOC entry 4796 (class 2606 OID 33784)
+-- Name: meeting_attendees meeting_attendees_qr_code_token_key; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meeting_attendees
+    ADD CONSTRAINT meeting_attendees_qr_code_token_key UNIQUE (qr_code_token);
+
+
+--
+-- TOC entry 4803 (class 2606 OID 33786)
+-- Name: meetings meetings_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meetings
+    ADD CONSTRAINT meetings_pkey PRIMARY KEY (meeting_id);
+
+
+--
+-- TOC entry 4805 (class 2606 OID 33788)
+-- Name: organizations organizations_org_name_key; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.organizations
+    ADD CONSTRAINT organizations_org_name_key UNIQUE (org_name);
+
+
+--
+-- TOC entry 4807 (class 2606 OID 33790)
+-- Name: organizations organizations_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.organizations
+    ADD CONSTRAINT organizations_pkey PRIMARY KEY (org_id);
+
+
+--
+-- TOC entry 4810 (class 2606 OID 33792)
+-- Name: push_subscriptions push_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.push_subscriptions
+    ADD CONSTRAINT push_subscriptions_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 4815 (class 2606 OID 33794)
+-- Name: secretary_scopes secretary_scopes_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.secretary_scopes
+    ADD CONSTRAINT secretary_scopes_pkey PRIMARY KEY (user_id, org_id);
+
+
+--
+-- TOC entry 4819 (class 2606 OID 33796)
+-- Name: task_assigned_orgs task_assigned_orgs_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_assigned_orgs
+    ADD CONSTRAINT task_assigned_orgs_pkey PRIMARY KEY (task_id, org_id);
+
+
+--
+-- TOC entry 4821 (class 2606 OID 33798)
+-- Name: task_documents task_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_documents
+    ADD CONSTRAINT task_documents_pkey PRIMARY KEY (doc_id);
+
+
+--
+-- TOC entry 4825 (class 2606 OID 33800)
+-- Name: task_trackers task_trackers_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_trackers
+    ADD CONSTRAINT task_trackers_pkey PRIMARY KEY (task_id, user_id);
+
+
+--
+-- TOC entry 4830 (class 2606 OID 33802)
+-- Name: tasks tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.tasks
+    ADD CONSTRAINT tasks_pkey PRIMARY KEY (task_id);
+
+
+--
+-- TOC entry 4812 (class 2606 OID 33804)
+-- Name: push_subscriptions unique_user_subscription; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.push_subscriptions
+    ADD CONSTRAINT unique_user_subscription UNIQUE (user_id, subscription_object);
+
+
+--
+-- TOC entry 4834 (class 2606 OID 33806)
+-- Name: user_organizations user_organizations_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.user_organizations
+    ADD CONSTRAINT user_organizations_pkey PRIMARY KEY (user_id, org_id);
+
+
+--
+-- TOC entry 4837 (class 2606 OID 33808)
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_email_key UNIQUE (email);
+
+
+--
+-- TOC entry 4839 (class 2606 OID 33810)
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (user_id);
+
+
+--
+-- TOC entry 4841 (class 2606 OID 33812)
+-- Name: users users_username_key; Type: CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_username_key UNIQUE (username);
+
+
+--
+-- TOC entry 4787 (class 1259 OID 33813)
+-- Name: idx_agendas_meeting_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_agendas_meeting_id ON public.agendas USING btree (meeting_id);
+
+
+--
+-- TOC entry 4790 (class 1259 OID 33814)
+-- Name: idx_documents_agenda_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_documents_agenda_id ON public.documents USING btree (agenda_id);
+
+
+--
+-- TOC entry 4791 (class 1259 OID 33815)
+-- Name: idx_meeting_attendees_meeting_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meeting_attendees_meeting_id ON public.meeting_attendees USING btree (meeting_id);
+
+
+--
+-- TOC entry 4792 (class 1259 OID 33816)
+-- Name: idx_meeting_attendees_user_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meeting_attendees_user_id ON public.meeting_attendees USING btree (user_id);
+
+
+--
+-- TOC entry 4797 (class 1259 OID 33817)
+-- Name: idx_meetings_chairperson_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meetings_chairperson_id ON public.meetings USING btree (chairperson_id);
+
+
+--
+-- TOC entry 4798 (class 1259 OID 33818)
+-- Name: idx_meetings_creator_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meetings_creator_id ON public.meetings USING btree (creator_id);
+
+
+--
+-- TOC entry 4799 (class 1259 OID 33819)
+-- Name: idx_meetings_meeting_secretary_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meetings_meeting_secretary_id ON public.meetings USING btree (meeting_secretary_id);
+
+
+--
+-- TOC entry 4800 (class 1259 OID 33820)
+-- Name: idx_meetings_org_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meetings_org_id ON public.meetings USING btree (org_id);
+
+
+--
+-- TOC entry 4801 (class 1259 OID 33821)
+-- Name: idx_meetings_start_time; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_meetings_start_time ON public.meetings USING btree (start_time DESC);
+
+
+--
+-- TOC entry 4808 (class 1259 OID 33822)
+-- Name: idx_push_subscriptions_user_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_push_subscriptions_user_id ON public.push_subscriptions USING btree (user_id);
+
+
+--
+-- TOC entry 4813 (class 1259 OID 33823)
+-- Name: idx_secretary_scopes_user_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_secretary_scopes_user_id ON public.secretary_scopes USING btree (user_id);
+
+
+--
+-- TOC entry 4816 (class 1259 OID 33824)
+-- Name: idx_task_assigned_orgs_org_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_task_assigned_orgs_org_id ON public.task_assigned_orgs USING btree (org_id);
+
+
+--
+-- TOC entry 4817 (class 1259 OID 33825)
+-- Name: idx_task_assigned_orgs_task_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_task_assigned_orgs_task_id ON public.task_assigned_orgs USING btree (task_id);
+
+
+--
+-- TOC entry 4822 (class 1259 OID 33826)
+-- Name: idx_task_trackers_task_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_task_trackers_task_id ON public.task_trackers USING btree (task_id);
+
+
+--
+-- TOC entry 4823 (class 1259 OID 33827)
+-- Name: idx_task_trackers_user_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_task_trackers_user_id ON public.task_trackers USING btree (user_id);
+
+
+--
+-- TOC entry 4826 (class 1259 OID 33828)
+-- Name: idx_tasks_creator_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_tasks_creator_id ON public.tasks USING btree (creator_id);
+
+
+--
+-- TOC entry 4827 (class 1259 OID 33829)
+-- Name: idx_tasks_due_date_created_at; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_tasks_due_date_created_at ON public.tasks USING btree (due_date, created_at DESC);
+
+
+--
+-- TOC entry 4828 (class 1259 OID 33830)
+-- Name: idx_tasks_status; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_tasks_status ON public.tasks USING btree (status);
+
+
+--
+-- TOC entry 4831 (class 1259 OID 33831)
+-- Name: idx_user_organizations_org_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_user_organizations_org_id ON public.user_organizations USING btree (org_id);
+
+
+--
+-- TOC entry 4832 (class 1259 OID 33832)
+-- Name: idx_user_organizations_user_id; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_user_organizations_user_id ON public.user_organizations USING btree (user_id);
+
+
+--
+-- TOC entry 4835 (class 1259 OID 33833)
+-- Name: idx_users_role; Type: INDEX; Schema: public; Owner: hoangviet
+--
+
+CREATE INDEX idx_users_role ON public.users USING btree (role);
+
+
+--
+-- TOC entry 4842 (class 2606 OID 33834)
+-- Name: agendas agendas_meeting_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.agendas
+    ADD CONSTRAINT agendas_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES public.meetings(meeting_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4843 (class 2606 OID 33839)
+-- Name: documents documents_agenda_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.documents
+    ADD CONSTRAINT documents_agenda_id_fkey FOREIGN KEY (agenda_id) REFERENCES public.agendas(agenda_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4844 (class 2606 OID 33844)
+-- Name: meeting_attendees meeting_attendees_meeting_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meeting_attendees
+    ADD CONSTRAINT meeting_attendees_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES public.meetings(meeting_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4845 (class 2606 OID 33849)
+-- Name: meeting_attendees meeting_attendees_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meeting_attendees
+    ADD CONSTRAINT meeting_attendees_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4846 (class 2606 OID 33854)
+-- Name: meetings meetings_chairperson_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meetings
+    ADD CONSTRAINT meetings_chairperson_id_fkey FOREIGN KEY (chairperson_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4847 (class 2606 OID 33859)
+-- Name: meetings meetings_creator_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meetings
+    ADD CONSTRAINT meetings_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4848 (class 2606 OID 33864)
+-- Name: meetings meetings_meeting_secretary_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meetings
+    ADD CONSTRAINT meetings_meeting_secretary_id_fkey FOREIGN KEY (meeting_secretary_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4849 (class 2606 OID 33869)
+-- Name: meetings meetings_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.meetings
+    ADD CONSTRAINT meetings_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(org_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4850 (class 2606 OID 33874)
+-- Name: organizations organizations_parent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.organizations
+    ADD CONSTRAINT organizations_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.organizations(org_id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4851 (class 2606 OID 33879)
+-- Name: push_subscriptions push_subscriptions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.push_subscriptions
+    ADD CONSTRAINT push_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4852 (class 2606 OID 33884)
+-- Name: secretary_scopes secretary_scopes_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.secretary_scopes
+    ADD CONSTRAINT secretary_scopes_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(org_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4853 (class 2606 OID 33889)
+-- Name: secretary_scopes secretary_scopes_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.secretary_scopes
+    ADD CONSTRAINT secretary_scopes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4854 (class 2606 OID 33894)
+-- Name: task_assigned_orgs task_assigned_orgs_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_assigned_orgs
+    ADD CONSTRAINT task_assigned_orgs_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(org_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4855 (class 2606 OID 33899)
+-- Name: task_assigned_orgs task_assigned_orgs_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_assigned_orgs
+    ADD CONSTRAINT task_assigned_orgs_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(task_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4856 (class 2606 OID 33904)
+-- Name: task_documents task_documents_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_documents
+    ADD CONSTRAINT task_documents_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(task_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4857 (class 2606 OID 33909)
+-- Name: task_trackers task_trackers_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_trackers
+    ADD CONSTRAINT task_trackers_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(task_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4858 (class 2606 OID 33914)
+-- Name: task_trackers task_trackers_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.task_trackers
+    ADD CONSTRAINT task_trackers_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4859 (class 2606 OID 33919)
+-- Name: tasks tasks_creator_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.tasks
+    ADD CONSTRAINT tasks_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4860 (class 2606 OID 33924)
+-- Name: user_organizations user_organizations_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.user_organizations
+    ADD CONSTRAINT user_organizations_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(org_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 4861 (class 2606 OID 33929)
+-- Name: user_organizations user_organizations_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: hoangviet
+--
+
+ALTER TABLE ONLY public.user_organizations
+    ADD CONSTRAINT user_organizations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5033 (class 0 OID 0)
+-- Dependencies: 5
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
+--
+
+GRANT USAGE ON SCHEMA public TO hoangviet;
+
+
+--
+-- TOC entry 2113 (class 826 OID 33934)
+-- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO hoangviet;
+
+
+--
+-- TOC entry 2114 (class 826 OID 33935)
+-- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO hoangviet;
+
+
+-- Completed on 2025-10-03 20:42:10
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict VzSYGUcJbF0U0sv41VC5bAshdHJSPoP3adIidxWduacaNLrUx3XcC7LKsMmdFhC
+

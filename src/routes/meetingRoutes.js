@@ -6,7 +6,6 @@ const {
   updateMeeting, 
   deleteMeeting,
   searchMeetings,
-  getDocumentViewUrl,
   sendCustomNotification,
   getAttendanceStats,
   updateAttendance,

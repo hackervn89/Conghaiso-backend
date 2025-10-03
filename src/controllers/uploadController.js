@@ -1,12 +1,19 @@
-const googleDriveService = require('../services/googleDriveService');
+const storageService = require('../services/storageService');
 
 const uploadDocument = async (req, res) => {
   try {
+    const { entityId } = req.body;
+
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'Vui lòng chọn ít nhất một file để tải lên.' });
     }
 
-    // SỬA LỖI TRIỆT ĐỂ: Chuyển đổi mã hóa tên file từ latin1 (mặc định của multer) sang utf8
+    // entityId là bắt buộc để đặt tệp vào đúng thư mục.
+    if (!entityId) {
+        return res.status(400).json({ message: 'Yêu cầu phải có entityId (ví dụ: meetingId, taskId).' });
+    }
+
+    // Sửa lỗi mã hóa tên tệp từ latin1 (mặc định của multer) sang utf8
     const decodedFiles = req.files.map(file => {
       const decodedName = Buffer.from(file.originalname, 'latin1').toString('utf8');
       return {
@@ -15,13 +22,16 @@ const uploadDocument = async (req, res) => {
       };
     });
 
-    // Sử dụng mảng file đã được giải mã tên để tải lên
-    const uploadPromises = decodedFiles.map(file => googleDriveService.uploadFile(file));
-    const uploadedFiles = await Promise.all(uploadPromises);
+    // Sử dụng storageService mới để lưu tệp cục bộ
+    const uploadPromises = decodedFiles.map(file => 
+        storageService.saveFileToEntityFolder(file, entityId)
+    );
+    const savedFilePaths = await Promise.all(uploadPromises);
     
-    const filesInfo = uploadedFiles.map(file => ({
-      id: file.id,
-      name: file.name, // Tên file trả về từ Google Drive giờ đã đúng chuẩn UTF-8
+    // Thông tin trả về cho client
+    const filesInfo = decodedFiles.map((file, index) => ({
+      filePath: savedFilePaths[index], // Đường dẫn tương đối trên server
+      name: file.originalname,       // Tên gốc của tệp
     }));
 
     res.status(201).json({
@@ -30,7 +40,7 @@ const uploadDocument = async (req, res) => {
     });
   } catch (error) {
     console.error('Lỗi khi tải file lên:', error);
-    res.status(500).json({ message: 'Đã có lỗi xảy ra trên server.' });
+    res.status(500).json({ message: 'Đã có lỗi xảy ra trên server khi tải tệp lên.' });
   }
 };
 

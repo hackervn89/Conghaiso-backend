@@ -1,7 +1,7 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { extractFileIdFromUrl, exportDocumentContent } = require("../services/googleDriveService");
-const axios = require('axios');
-// const cheerio = require('cheerio');
+const fs = require('fs/promises');
+const path = require('path');
+const { STORAGE_BASE_PATH } = require("../services/storageService");
 
 // Khởi tạo Gemini AI với khóa API
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -53,36 +53,32 @@ async function callGeminiWithRetry(prompt, retries = MAX_RETRIES, delay = INITIA
 }
 
 const summarizeDocument = async (req, res) => {
-  const { url } = req.body;
+  const { filePath } = req.body;
 
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
+  if (!filePath) {
+    return res.status(400).json({ error: 'filePath is required' });
   }
 
   let documentContent = '';
 
   try {
-    // --- Cố gắng lấy nội dung bằng Google Drive API (ưu tiên) ---
-    const fileId = extractFileIdFromUrl(url);
-    if (fileId) {
-      try {
-        documentContent = await exportDocumentContent(fileId);
-        console.log('Content extracted using Google Drive API.');
-      } catch (driveError) {
-        console.warn(`Google Drive API failed for ${url}: ${driveError.message}. Attempting fallback.`);
-        documentContent = ''; // Reset content for fallback
-      }
+    // --- Lấy nội dung từ hệ thống file cục bộ ---
+    const absoluteFilePath = path.join(STORAGE_BASE_PATH, filePath);
+    
+    // Security check
+    if (!absoluteFilePath.startsWith(STORAGE_BASE_PATH)) {
+        return res.status(400).json({ error: 'Invalid file path' });
     }
 
-    // --- Nếu Google Drive API không thành công hoặc không phải URL Drive, thử phương pháp HTTP GET + Cheerio ---
-    // if (!documentContent || documentContent.trim().length === 0) {
-    //   console.log('Attempting to extract content using HTTP GET and Cheerio.');
-    //   const response = await axios.get(url);
-    //   const html = response.data;
-    //   const $ = cheerio.load(html);
-    //   documentContent = $('body').text(); // Trích xuất văn bản từ body HTML
-    //   console.log('Content extracted using HTTP GET and Cheerio.');
-    // }
+    try {
+        documentContent = await fs.readFile(absoluteFilePath, 'utf8');
+        console.log('Content extracted from local file system.');
+    } catch (readError) {
+        if (readError.code === 'ENOENT') {
+            return res.status(404).json({ error: 'File not found.' });
+        }
+        throw readError; // Re-throw other read errors
+    }
 
     if (!documentContent || documentContent.trim().length === 0) {
       throw new Error('Could not extract any meaningful document content.');

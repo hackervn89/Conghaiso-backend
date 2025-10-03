@@ -1,0 +1,131 @@
+Tài liệu Kỹ thuật Backend - Hệ thống Công Hải số
+================================================
+
+Dưới đây là phân tích chi tiết về mã nguồn backend. Tài liệu này được cấu trúc để giúp các nhà phát triển mới hiểu rõ về kiến trúc, các thành phần và luồng hoạt động của hệ thống.
+
+---
+
+## **Phần 1: Tổng quan về Hệ thống**
+
+### **1.1. Công nghệ sử dụng**
+
+Hệ thống backend được xây dựng trên nền tảng **Node.js** và sử dụng framework **Express.js** để tạo các API RESTful. Dựa vào tệp `package.json`, các công nghệ và thư viện chính bao gồm:
+
+*   **Framework:** Express.js (`express`)
+*   **Cơ sở dữ liệu:** PostgreSQL (`pg`).
+*   **Xác thực & Phân quyền:** JSON Web Tokens (`jsonwebtoken`) để tạo và xác thực token, `bcryptjs` để mã hóa mật khẩu.
+*   **Quản lý file:** `multer` để xử lý upload file, `googleapis` để tích hợp với Google Drive.
+*   **Xử lý văn bản:** `mammoth` để chuyển đổi `.docx`, `pdf-extraction` để trích xuất text từ file PDF.
+*   **Tác vụ nền (Background Jobs):** `node-cron` để lập lịch các công việc định kỳ.
+*   **Push Notification:** `expo-server-sdk` để gửi push notification đến ứng dụng di động Expo.
+*   **Caching:** `ioredis` để tương tác với Redis.
+*   **Môi trường:** `dotenv` để quản lý các biến môi trường.
+*   **AI:** `@google/generative-ai` để tích hợp với các mô hình ngôn ngữ của Google (Gemini).
+
+### **1.2. Cấu trúc Thư mục**
+
+Mã nguồn được tổ chức theo mô hình phân lớp, phân tách rõ ràng các chức năng:
+
+*   `src/config`: Chứa cấu hình của ứng dụng, điển hình là kết nối cơ sở dữ liệu.
+*   `src/routes`: Định nghĩa các điểm cuối (endpoints) của API và liên kết chúng với các hàm xử lý trong controllers.
+*   `src/controllers`: Chứa business logic.
+*   `src/models`: Định nghĩa cấu trúc dữ liệu và tương tác trực tiếp với cơ sở dữ liệu.
+*   `src/middleware`: Chứa các hàm trung gian (ví dụ: xác thực).
+*   `src/services`: Chứa các logic tương tác với các dịch vụ bên ngoài.
+
+### **1.3. Luồng hoạt động của một Request**
+
+1.  Client gửi request đến một endpoint.
+2.  `server.js` nhận và chuyển đến `routes` tương ứng.
+3.  Tệp `route` xác định `controller` xử lý.
+4.  Request đi qua `middleware` (ví dụ: `authMiddleware` để kiểm tra token).
+5.  `Controller` thực thi logic, có thể gọi đến `model` hoặc `service`.
+6.  `Model` truy vấn CSDL.
+7.  `Controller` trả về response cho client.
+
+---
+
+## **Phần 2: Phân tích chi tiết các tệp**
+
+### **2.1. Thư mục gốc (Root)**
+
+*   **`package.json`**: Tệp kê khai của dự án, định nghĩa scripts và quản lý thư viện.
+*   **`server.js`**: Điểm khởi đầu của ứng dụng. Khởi tạo server, cấu hình middleware, liên kết routes, kiểm tra kết nối CSDL và khởi động cron job.
+
+### **2.2. Thư mục `src/config`**
+
+*   **`database.js`**: Chịu trách nhiệm cấu hình và khởi tạo kết nối đến PostgreSQL. Sử dụng `pg.Pool` để quản lý kết nối hiệu quả. Có cấu hình linh hoạt cho môi trường production (dùng `DATABASE_URL`) và development (dùng các biến môi trường riêng lẻ).
+
+### **2.3. Thư mục `src/routes`**
+
+Đây là "cổng vào" của API, ánh xạ các đường dẫn URL tới các hàm controller.
+
+*   **`authRoutes.js`**: `/api/auth` - Đăng nhập, đăng xuất, lấy thông tin người dùng (`/me`).
+*   **`userRoutes.js`**: `/api/users` - CRUD cho người dùng (yêu cầu admin), lấy danh sách đồng nghiệp, lưu push token.
+*   **`organizationRoutes.js`**: `/api/organizations` - CRUD cho phòng ban (yêu cầu admin).
+*   **`meetingRoutes.js`**: `/api/meetings` - Module phức tạp nhất, quản lý CRUD cuộc họp, tìm kiếm, điểm danh bằng QR, xem tài liệu, gửi thông báo.
+*   **`taskRoutes.js`**: `/api/tasks` - CRUD cho công việc, cập nhật trạng thái.
+*   **`uploadRoutes.js`**: `/api/upload` - Endpoint để tải tệp lên, sử dụng `multer`.
+*   **`dashboardRoutes.js`**: `/api/dashboard` - Cung cấp API lấy dữ liệu thống kê.
+*   **`reportRoutes.js`**: `/api/reports` - Cung cấp API tạo báo cáo phức tạp.
+*   **`summarizeRoutes.js`**: `/api/summarize` - Cung cấp API tóm tắt văn bản bằng AI.
+
+---
+
+## **Phần 3: Phân tích Controllers (`src/controllers`)**
+
+Đây là "bộ não" của ứng dụng, chứa logic nghiệp vụ.
+
+*   **`authController.js`**: Xử lý đăng nhập (so sánh mật khẩu hash, tạo JWT), đăng xuất (xóa push token), và lấy thông tin người dùng.
+*   **`userController.js`**: Thực thi logic CRUD cho người dùng, xử lý lỗi trùng lặp, lấy danh sách nhóm...
+*   **`organizationController.js`**: Thực thi logic CRUD cho phòng ban, xử lý lỗi khóa ngoại khi xóa.
+*   **`meetingController.js`**: Controller phức tạp nhất. Tích hợp Redis caching (cache-aside pattern), quản lý quyền hạn, điều phối việc tạo/xóa file trên Google Drive, gửi thông báo, và xử lý logic điểm danh QR.
+*   **`taskController.js`**: Quản lý logic CRUD công việc, có hệ thống phân quyền chi tiết (ai được sửa, ai được cập nhật trạng thái).
+*   **`uploadController.js`**: Xử lý tệp tải lên từ `multer`, sửa lỗi encoding tên tệp tiếng Việt, và gọi `googleDriveService` để tải file lên.
+*   **`dashboardController.js`**: Gọi các model khác nhau để tổng hợp dữ liệu thống kê cho dashboard.
+*   **`reportController.js`**: Xây dựng câu lệnh SQL động, phức tạp để tạo báo cáo, sau đó tự chuyển đổi cấu trúc dữ liệu trả về cho phù hợp.
+*   **`summarizeController.js`**: Tích hợp với Google Gemini. Có khả năng trích xuất nội dung từ Google Docs, PDF, DOCX. Sử dụng kỹ thuật "map-reduce" (chia nhỏ và tóm tắt từng phần) cho văn bản lớn và có cơ chế tự thử lại khi API bị lỗi.
+
+---
+
+## **Phần 4: Phân tích Models (`src/models`)**
+
+Lớp truy cập dữ liệu, chứa các câu lệnh SQL.
+
+*   **`userModel.js`**: Quản lý CSDL cho người dùng. Sử dụng transaction cho các tác vụ phức tạp (tạo, sửa user). Tối ưu hóa truy vấn bằng Window Function. Gọi đến function của CSDL (`build_org_tree_with_users`).
+*   **`organizationModel.js`**: Quản lý CSDL cho phòng ban. Có kiến trúc thông minh: ưu tiên gọi function `build_org_tree()` của CSDL để lấy dữ liệu dạng cây, nếu lỗi thì có code dự phòng để tự xây dựng cây trong ứng dụng.
+*   **`meetingModel.js`**: Model phức tạp nhất. Dùng `json_agg` để xây dựng đối tượng JSON lồng nhau ngay trong SQL. Tích hợp chặt chẽ với `googleDriveService` trong các transaction. Logic phân quyền được nhúng trong các truy vấn.
+*   **`taskModel.js`**: Quản lý CSDL cho công việc. Xây dựng truy vấn động để lọc dữ liệu. Tối ưu hóa "N+1 query" bằng cách lấy dữ liệu liên quan trong các truy vấn song song.
+
+---
+
+## **Phần 5: Phân tích Services (`src/services`)**
+
+Logic tương tác với các dịch vụ bên ngoài.
+
+*   **`googleDriveService.js`**: Đóng gói toàn bộ tương tác với Google Drive API. Xử lý xác thực, quản lý file/folder, và đặc biệt là có hàm `exportDocumentContent` rất thông minh để trích xuất text từ Google Docs, PDF, và DOCX.
+*   **`notificationService.js`**: Gửi thông báo đẩy qua Expo. Có cơ chế lọc token, chia nhỏ (chunking) và kiểm tra biên nhận (receipt) để theo dõi trạng thái gửi cuối cùng.
+*   **`redisService.js`**: Khởi tạo và quản lý kết nối đến Redis, tạo ra một client duy nhất cho toàn bộ ứng dụng.
+*   **`cronService.js`**: Sử dụng `node-cron` để lập lịch tác vụ (gửi thông báo nhắc nhở cuộc họp vào 7h sáng hàng ngày). Có cơ chế đánh dấu để không gửi lặp lại.
+
+---
+
+## **Phần 6: Phân tích Middleware (`src/middleware`)**
+
+"Người gác cổng" của hệ thống.
+
+*   **`authMiddleware.js`**:
+    *   `protect`: Middleware quan trọng nhất. Giải mã JWT từ header, lấy thông tin người dùng từ CSDL và gắn vào `req.user` để các controller sau sử dụng.
+    *   `isAdmin`: Middleware kiểm tra quyền admin, phải được dùng sau `protect`.
+
+---
+
+## **Phần 7: Tổng kết**
+
+*   **Kiến trúc 3 lớp rõ ràng:** Dễ bảo trì và mở rộng.
+*   **Bảo mật chặt chẽ:** Sử dụng JWT và cơ chế phân quyền rõ ràng.
+*   **Tối ưu hóa hiệu năng:** Tận dụng Caching (Redis), xử lý bất đồng bộ, và các tính năng SQL nâng cao.
+*   **Khả năng chống lỗi (Resilience):** Sử dụng Transactions, có cơ chế dự phòng và thử lại.
+*   **Tích hợp mạnh mẽ:** Làm việc tốt với Google Drive, Google Gemini AI, và Expo Push Notification.
+
+Đây là một hệ thống backend được xây dựng tốt, có cấu trúc rõ ràng và áp dụng nhiều kỹ thuật hiện đại.
