@@ -48,7 +48,6 @@ const create = async (taskData, creatorId) => {
 const findAll = async (user, filters) => {
     const { dynamicStatus, orgId } = filters;
 
-    // Step 1: Build the main query with filters
     let mainQuery = `
         SELECT
             t.task_id, t.title, t.status, t.priority, t.due_date, t.completed_at, t.created_at,
@@ -58,34 +57,44 @@ const findAll = async (user, filters) => {
     `;
     const whereClauses = [];
     const params = [];
+    let paramIndex = 1;
 
     if (user.role !== 'Admin') {
-        const userParamIndex = `${params.length + 1}`;
         whereClauses.push(`(
-            t.creator_id = ${userParamIndex}
-            OR t.task_id IN (SELECT task_id FROM task_trackers WHERE user_id = ${userParamIndex})
+            t.creator_id = $${paramIndex}
+            OR t.task_id IN (SELECT task_id FROM task_trackers WHERE user_id = $${paramIndex})
         )`);
         params.push(user.user_id);
+        paramIndex++;
     }
 
     if (dynamicStatus) {
         let dynamicStatusArray = Array.isArray(dynamicStatus) ? dynamicStatus : String(dynamicStatus).split(',').map(s => s.trim());
         const statusConditions = [];
+        
         dynamicStatusArray.forEach(statusItem => {
             switch (statusItem) {
                 case 'on_time': statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date >= CURRENT_DATE)`); break;
                 case 'overdue': statusConditions.push(`(t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)`); break;
                 case 'completed_on_time': statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at <= t.due_date)`); break;
                 case 'completed_late': statusConditions.push(`(t.status = 'completed' AND t.completed_at IS NOT NULL AND t.due_date IS NOT NULL AND t.completed_at > t.due_date)`); break;
-                default: statusConditions.push(`t.status = '${statusItem}'`); break;
+                default:
+                    statusConditions.push(`t.status = $${paramIndex}`);
+                    params.push(statusItem);
+                    paramIndex++;
+                    break;
             }
         });
-        if (statusConditions.length > 0) whereClauses.push(`(${statusConditions.join(' OR ')})`);
+
+        if (statusConditions.length > 0) {
+            whereClauses.push(`(${statusConditions.join(' OR ')})`);
+        }
     }
 
     if (orgId) {
-        whereClauses.push(`t.task_id IN (SELECT task_id FROM task_assigned_orgs WHERE org_id = ${params.length + 1})`);
+        whereClauses.push(`t.task_id IN (SELECT task_id FROM task_assigned_orgs WHERE org_id = $${paramIndex})`);
         params.push(orgId);
+        paramIndex++;
     }
 
     if (whereClauses.length > 0) {
@@ -94,14 +103,12 @@ const findAll = async (user, filters) => {
 
     mainQuery += ' ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC';
 
-    // Step 2: Execute main query to get tasks
     const { rows: tasks } = await db.query(mainQuery, params);
     if (tasks.length === 0) {
         return [];
     }
     const taskIds = tasks.map(t => t.task_id);
 
-    // Step 3: Fetch related data in batches
     const orgsQuery = `
         SELECT tao.task_id, o.org_id, o.org_name
         FROM task_assigned_orgs tao
@@ -120,7 +127,6 @@ const findAll = async (user, filters) => {
         db.query(trackersQuery, [taskIds]),
     ]);
 
-    // Step 4: Create maps for efficient data stitching
     const orgsMap = new Map();
     orgsResult.rows.forEach(row => {
         if (!orgsMap.has(row.task_id)) orgsMap.set(row.task_id, []);
@@ -133,7 +139,6 @@ const findAll = async (user, filters) => {
         trackersMap.get(row.task_id).push({ user_id: row.user_id, full_name: row.full_name });
     });
 
-    // Step 5: Stitch data together
     tasks.forEach(task => {
         task.assigned_orgs = orgsMap.get(task.task_id) || [];
         task.trackers = trackersMap.get(task.task_id) || [];

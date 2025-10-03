@@ -62,7 +62,7 @@ const createTask = async (req, res) => {
 };
 
 const getTasks = async (req, res) => {
-    try {
+    try {        
         const tasks = await taskModel.findAll(req.user, req.query);
         res.status(200).json(tasks);
     } catch (error) {
