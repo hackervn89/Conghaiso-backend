@@ -5,9 +5,7 @@ let dbConfig;
 
 if (process.env.DATABASE_URL) {
   dbConfig = {
-    connectionString: process.env.DATABASE_URL,
-    // Render requires SSL connections, and this setting is often necessary
-    // for Node.js applications to connect to Render's PostgreSQL.
+    connectionString: process.env.DATABASE_URL,   
     ssl: {
       rejectUnauthorized: false,
     },
