@@ -1,7 +1,6 @@
 const meetingModel = require('../models/meetingModel');
 const userModel = require('../models/userModel');
 const notificationService = require('../services/notificationService');
-const googleDriveService = require('../services/googleDriveService');
 const qrcode = require('qrcode');
 const redis = require('../services/redisService');
 
@@ -176,26 +175,6 @@ const searchMeetings = async (req, res) => {
   }
 };
 
-const getDocumentViewUrl = async (req, res) => {
-  const { meetingId, fileId } = req.params;
-  const user = req.user;
-  try {
-    const meeting = await meetingModel.findById(meetingId, user);
-    if (!meeting) {
-      return res.status(404).json({ message: 'Không tìm thấy cuộc họp hoặc không có quyền truy cập.' });
-    }
-    await googleDriveService.makeFilePublic(fileId);
-    const fileInfo = await googleDriveService.getFileInfo(fileId);
-    const REVOKE_DELAY_MS = 5 * 60 * 1000;
-    setTimeout(() => {
-      googleDriveService.revokePublicPermission(fileId);
-    }, REVOKE_DELAY_MS);
-    res.status(200).json({ url: fileInfo.webViewLink });
-  } catch (error) {
-    console.error('Lỗi khi lấy URL xem tài liệu:', error);
-    res.status(500).json({ message: 'Không thể lấy link xem tài liệu.' });
-  }
-};
 
 const sendCustomNotification = async (req, res) => {
     const { meetingId } = req.params;

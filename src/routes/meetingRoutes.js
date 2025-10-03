@@ -19,7 +19,6 @@ const router = express.Router();
 router.use(protect);
 
 router.get('/search', searchMeetings);
-router.get('/:meetingId/documents/:fileId/view-url', getDocumentViewUrl);
 router.post('/:meetingId/notify', sendCustomNotification);
 
 // --- Routes for attendance ---

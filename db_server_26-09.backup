@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict VzSYGUcJbF0U0sv41VC5bAshdHJSPoP3adIidxWduacaNLrUx3XcC7LKsMmdFhC
+\restrict 2wYndfdg5MOcfh4966SfqbxHtWfjloytb9guoCvukFGFwu70GJeqhvFWkswJ5XW
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
 
--- Started on 2025-10-03 20:42:10
+-- Started on 2025-10-03 21:30:47
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -200,7 +200,7 @@ CREATE TABLE public.documents (
     doc_id integer NOT NULL,
     agenda_id integer NOT NULL,
     doc_name character varying(255) NOT NULL,
-    google_drive_file_id character varying(255) NOT NULL
+    file_path character varying(512)
 );
 
 
@@ -262,7 +262,6 @@ CREATE TABLE public.meetings (
     org_id integer,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
-    google_drive_folder_id character varying(255),
     chairperson_id integer,
     meeting_secretary_id integer,
     qr_code_token text
@@ -412,7 +411,7 @@ CREATE TABLE public.task_documents (
     doc_id integer NOT NULL,
     task_id integer NOT NULL,
     doc_name character varying(255) NOT NULL,
-    google_drive_file_id character varying(255) NOT NULL
+    file_path character varying(512)
 );
 
 
@@ -644,7 +643,7 @@ COPY public.agendas (agenda_id, meeting_id, title, display_order) FROM stdin;
 -- Data for Name: documents; Type: TABLE DATA; Schema: public; Owner: hoangviet
 --
 
-COPY public.documents (doc_id, agenda_id, doc_name, google_drive_file_id) FROM stdin;
+COPY public.documents (doc_id, agenda_id, doc_name, file_path) FROM stdin;
 \.
 
 
@@ -669,8 +668,8 @@ COPY public.meeting_attendees (meeting_id, user_id, status, check_in_time, qr_co
 -- Data for Name: meetings; Type: TABLE DATA; Schema: public; Owner: hoangviet
 --
 
-COPY public.meetings (meeting_id, title, location, start_time, end_time, creator_id, org_id, created_at, updated_at, google_drive_folder_id, chairperson_id, meeting_secretary_id, qr_code_token) FROM stdin;
-90	Test phân quyền	asdasdd	2025-09-26 16:38:00+07	\N	1	1	2025-09-23 16:40:27.272716+07	2025-09-23 16:40:27.272716+07	1qtoBtRzzP2b3FXDTsCWOpMlLZ0SCvx0M	\N	\N	d6aaab71969d55276fc4917cda6899c7
+COPY public.meetings (meeting_id, title, location, start_time, end_time, creator_id, org_id, created_at, updated_at, chairperson_id, meeting_secretary_id, qr_code_token) FROM stdin;
+90	Test phân quyền	asdasdd	2025-09-26 16:38:00+07	\N	1	1	2025-09-23 16:40:27.272716+07	2025-09-23 16:40:27.272716+07	\N	\N	d6aaab71969d55276fc4917cda6899c7
 \.
 
 
@@ -758,7 +757,7 @@ COPY public.task_assigned_orgs (task_id, org_id) FROM stdin;
 -- Data for Name: task_documents; Type: TABLE DATA; Schema: public; Owner: hoangviet
 --
 
-COPY public.task_documents (doc_id, task_id, doc_name, google_drive_file_id) FROM stdin;
+COPY public.task_documents (doc_id, task_id, doc_name, file_path) FROM stdin;
 \.
 
 
@@ -1504,11 +1503,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENC
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO hoangviet;
 
 
--- Completed on 2025-10-03 20:42:10
+-- Completed on 2025-10-03 21:30:47
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict VzSYGUcJbF0U0sv41VC5bAshdHJSPoP3adIidxWduacaNLrUx3XcC7LKsMmdFhC
+\unrestrict 2wYndfdg5MOcfh4966SfqbxHtWfjloytb9guoCvukFGFwu70GJeqhvFWkswJ5XW
 
