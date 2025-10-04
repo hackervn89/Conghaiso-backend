@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const userModel = require('../models/userModel');
 
 // Middleware 1: Kiểm tra token và xác thực người dùng
-const protect = async (req, res, next) => {
+const authenticate = async (req, res, next) => {
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
@@ -29,14 +29,20 @@ const protect = async (req, res, next) => {
   }
 };
 
-// Middleware 2: Kiểm tra vai trò Admin
-const isAdmin = (req, res, next) => {
-  if (req.user && req.user.role === 'Admin') {
-    next(); // Là Admin, cho phép đi tiếp
-  } else {
-    res.status(403).json({ message: 'Yêu cầu quyền Admin.' });
-  }
+// Middleware 2: Phân quyền dựa trên vai trò
+const authorize = (roles) => {
+  return (req, res, next) => {
+    if (!req.user || !req.user.role) {
+        return res.status(403).json({ message: 'Lỗi xác thực: không tìm thấy vai trò người dùng.' });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ 
+        message: `Từ chối truy cập. Yêu cầu vai trò là một trong các quyền sau: ${roles.join(', ')}.` 
+      });
+    }
+    next(); // Có quyền, cho phép đi tiếp
+  };
 };
 
-module.exports = { protect, isAdmin };
-
+module.exports = { authenticate, authorize };

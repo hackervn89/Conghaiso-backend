@@ -6,12 +6,12 @@ const {
     updateTaskStatus,
     deleteTask,
 } = require('../controllers/taskController');
-const { protect } = require('../middleware/authMiddleware');
+const { authenticate } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
 // Tất cả các route trong file này đều yêu cầu người dùng phải đăng nhập
-router.use(protect);
+router.use(authenticate);
 
 router.route('/')
     .get(getTasks)

@@ -12,11 +12,11 @@ const {
   getQrCodeToken,
   checkInWithQr
 } = require('../controllers/meetingController');
-const { protect } = require('../middleware/authMiddleware');
+const { authenticate } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(authenticate);
 
 router.get('/search', searchMeetings);
 router.post('/:meetingId/notify', sendCustomNotification);
@@ -37,4 +37,3 @@ router.route('/:id')
   .delete(deleteMeeting);
 
 module.exports = router;
-

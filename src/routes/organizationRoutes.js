@@ -1,18 +1,31 @@
 const express = require('express');
-const { getOrganizations, createOrganization, updateOrganization, deleteOrganization } = require('../controllers/organizationController');
-const { protect, isAdmin } = require('../middleware/authMiddleware');
-
 const router = express.Router();
+const organizationController = require('../controllers/organizationController');
+const { authenticate, authorize } = require('../middleware/authMiddleware');
 
-// Tất cả các route đều yêu cầu đăng nhập
-router.use(protect);
+// Routes cho quản lý đơn vị
+router.get('/', authenticate, organizationController.getAllOrgs);
+router.get('/tree', authenticate, organizationController.getOrgTree);
+router.get('/:id', authenticate, organizationController.getOrgById);
+router.post('/', authenticate, authorize(['Admin']), organizationController.createOrg);
+router.put('/:id', authenticate, authorize(['Admin']), organizationController.updateOrg);
+router.delete('/:id', authenticate, authorize(['Admin']), organizationController.deleteOrg);
 
-// Lấy danh sách (dành cho mọi người)
-router.get('/', getOrganizations);
+// Routes cho quản lý thành viên trong đơn vị
+router.get('/:orgId/users', authenticate, organizationController.getUsersByOrg);
+router.post('/:orgId/users', authenticate, authorize(['Admin']), organizationController.addUserToOrg);
+router.delete('/:orgId/users/:userId', authenticate, authorize(['Admin']), organizationController.removeUserFromOrg);
 
-// Các thao tác quản trị (chỉ dành cho Admin)
-router.post('/', isAdmin, createOrganization);
-router.put('/:id', isAdmin, updateOrganization);
-router.delete('/:id', isAdmin, deleteOrganization);
+// === CÁC ROUTE ĐỂ QUẢN LÝ LÃNH ĐẠO ===
+
+// Lấy danh sách lãnh đạo của một đơn vị
+router.get('/:orgId/leaders', authenticate, organizationController.getOrgLeaders);
+
+// Thêm một lãnh đạo (chỉ Admin)
+router.post('/:orgId/leaders', authenticate, authorize(['Admin']), organizationController.addOrgLeader);
+
+// Xóa một lãnh đạo (chỉ Admin)
+router.delete('/:orgId/leaders/:userId', authenticate, authorize(['Admin']), organizationController.removeOrgLeader);
 
 module.exports = router;
+

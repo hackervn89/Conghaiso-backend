@@ -1,54 +1,120 @@
 const organizationModel = require('../models/organizationModel');
 
-const getOrganizations = async (req, res) => {
-  try {
-    const organizations = await organizationModel.findAllHierarchical();
-    res.status(200).json(organizations);
-  } catch (error) {
-    console.error('Lỗi server khi lấy danh sách cơ quan:', error);
-    res.status(500).json({ message: 'Lỗi server khi lấy danh sách cơ quan.' });
-  }
+exports.getAllOrgs = async (req, res) => {
+    try {
+        const orgs = await organizationModel.getAll();
+        res.json(orgs);
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi lấy danh sách đơn vị', error: error.message });
+    }
 };
 
-const createOrganization = async (req, res) => {
+exports.getOrgTree = async (req, res) => {
+    try {
+        const tree = await organizationModel.getTree();
+        res.json(tree);
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi lấy cây đơn vị', error: error.message });
+    }
+};
+
+exports.getOrgById = async (req, res) => {
+    try {
+        const org = await organizationModel.findById(req.params.id);
+        if (org) {
+            res.json(org);
+        } else {
+            res.status(404).json({ message: 'Không tìm thấy đơn vị' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi lấy thông tin đơn vị', error: error.message });
+    }
+};
+
+exports.createOrg = async (req, res) => {
     try {
         const newOrg = await organizationModel.create(req.body);
         res.status(201).json(newOrg);
     } catch (error) {
-        console.error('Lỗi server khi tạo cơ quan:', error);
-        res.status(500).json({ message: 'Lỗi server khi tạo cơ quan.' });
+        res.status(500).json({ message: 'Lỗi khi tạo đơn vị mới', error: error.message });
     }
 };
 
-const updateOrganization = async (req, res) => {
+exports.updateOrg = async (req, res) => {
     try {
         const updatedOrg = await organizationModel.update(req.params.id, req.body);
-        if (!updatedOrg) {
-            return res.status(404).json({ message: 'Không tìm thấy cơ quan.' });
-        }
-        res.status(200).json(updatedOrg);
+        res.json(updatedOrg);
     } catch (error) {
-        console.error('Lỗi server khi cập nhật cơ quan:', error);
-        res.status(500).json({ message: 'Lỗi server khi cập nhật cơ quan.' });
+        res.status(500).json({ message: 'Lỗi khi cập nhật đơn vị', error: error.message });
     }
 };
 
-// --- HÀM DELETE ĐÃ ĐƯỢC NÂNG CẤP ĐỂ XỬ LÝ LỖI ---
-const deleteOrganization = async (req, res) => {
+exports.deleteOrg = async (req, res) => {
     try {
-        const deletedOrg = await organizationModel.remove(req.params.id);
-        if (!deletedOrg) {
-            return res.status(404).json({ message: 'Không tìm thấy cơ quan.' });
-        }
-        res.status(200).json({ message: 'Đã xóa cơ quan thành công.' });
+        await organizationModel.remove(req.params.id);
+        res.status(200).json({ message: 'Đã xóa đơn vị thành công' });
     } catch (error) {
-        // Kiểm tra mã lỗi của PostgreSQL cho vi phạm khóa ngoại
-        if (error.code === '23503') {
-            return res.status(400).json({ message: 'Không thể xóa. Vẫn còn người dùng hoặc dữ liệu khác phụ thuộc vào cơ quan/đơn vị này.' });
-        }
-        console.error('Lỗi khi xóa cơ quan:', error);
-        res.status(500).json({ message: 'Lỗi server khi xóa cơ quan.' });
+        res.status(500).json({ message: 'Lỗi khi xóa đơn vị', error: error.message });
     }
 };
 
-module.exports = { getOrganizations, createOrganization, updateOrganization, deleteOrganization };
+exports.getUsersByOrg = async (req, res) => {
+    try {
+        const users = await organizationModel.getUsersByOrgId(req.params.orgId);
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi lấy danh sách người dùng của đơn vị', error: error.message });
+    }
+};
+
+exports.addUserToOrg = async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const result = await organizationModel.addUserToOrg(req.params.orgId, userId);
+        res.status(201).json(result);
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi thêm người dùng vào đơn vị', error: error.message });
+    }
+};
+
+exports.removeUserFromOrg = async (req, res) => {
+    try {
+        await organizationModel.removeUserFromOrg(req.params.orgId, req.params.userId);
+        res.status(200).json({ message: 'Đã xóa người dùng khỏi đơn vị' });
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi xóa người dùng khỏi đơn vị', error: error.message });
+    }
+};
+
+// === CÁC HÀM ĐỂ QUẢN LÝ LÃNH ĐẠO ===
+
+exports.getOrgLeaders = async (req, res) => {
+    try {
+        const leaders = await organizationModel.getLeadersByOrgId(req.params.orgId);
+        res.json(leaders);
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi lấy danh sách lãnh đạo.', error: error.message });
+    }
+};
+
+exports.addOrgLeader = async (req, res) => {
+    const { userId, leaderTitle } = req.body;
+    const { orgId } = req.params;
+    try {
+        const newLeader = await organizationModel.addLeaderToOrg(orgId, userId, leaderTitle);
+        res.status(201).json(newLeader);
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi thêm lãnh đạo.', error: error.message });
+    }
+};
+
+exports.removeOrgLeader = async (req, res) => {
+    const { orgId, userId } = req.params;
+    try {
+        await organizationModel.removeLeaderFromOrg(orgId, userId);
+        res.status(200).json({ message: 'Đã xóa vai trò lãnh đạo thành công.' });
+    } catch (error) {
+        res.status(500).json({ message: 'Lỗi khi xóa lãnh đạo.', error: error.message });
+    }
+};
+
