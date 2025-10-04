@@ -315,7 +315,44 @@ const checkInWithQr = async (req, res) => {
         res.status(500).json({ message: 'Lỗi server khi điểm danh.' });
     }
 };
+// --- CHỨC NĂNG MỚI: ỦY QUYỀN THAM DỰ ---
+const getDelegationCandidates = async (req, res) => {
+    try {
+        const { meetingId } = req.params;
+        const delegatorUserId = req.user.userId; // Lấy từ middleware xác thực
 
+        const managedOrgIds = await meetingModel.getManagedOrgIds(delegatorUserId);
+        
+        if (managedOrgIds.length === 0) {
+            return res.json([]); // Nếu không quản lý đơn vị nào, trả về mảng rỗng
+        }
+
+        const candidates = await meetingModel.getDelegationCandidates(managedOrgIds, delegatorUserId);
+        res.json(candidates);
+    } catch (error) {
+        console.error('Error fetching delegation candidates:', error);
+        res.status(500).json({ message: 'Lỗi máy chủ khi lấy danh sách ủy quyền.' });
+    }
+};
+
+const delegateAttendance = async (req, res) => {
+    try {
+        const { meetingId } = req.params;
+        const { delegateToUserId } = req.body;
+        const delegatorUserId = req.user.userId;
+
+        if (!delegateToUserId) {
+            return res.status(400).json({ message: 'Vui lòng chọn người được ủy quyền.' });
+        }
+        
+        const result = await meetingModel.createDelegation(meetingId, delegatorUserId, delegateToUserId);
+
+        res.status(200).json({ message: 'Ủy quyền thành công!', data: result });
+    } catch (error) {
+        console.error('Error delegating attendance:', error);
+        res.status(500).json({ message: 'Lỗi máy chủ khi thực hiện ủy quyền.' });
+    }
+};
 module.exports = { 
     createMeeting,
     getMeetings, 
@@ -327,5 +364,7 @@ module.exports = {
     getAttendanceStats,
     updateAttendance,
     getQrCodeToken,
-    checkInWithQr
+    checkInWithQr,
+    getDelegationCandidates,
+    delegateAttendance
 };

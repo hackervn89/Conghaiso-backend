@@ -381,6 +381,60 @@ const checkInWithQr = async (meetingId, token, userId) => {
         client.release();
     }
 };
+// Lấy danh sách các đơn vị mà một user là lãnh đạo
+const getManagedOrgIds = async (userId) => {
+    const query = 'SELECT org_id FROM organization_leaders WHERE user_id = $1';
+    const { rows } = await pool.query(query, [userId]);
+    return rows.map(row => row.org_id);
+};
+
+// Lấy danh sách thành viên từ các đơn vị được quản lý (để ủy quyền)
+const getDelegationCandidates = async (managedOrgIds, delegatorUserId) => {
+    if (managedOrgIds.length === 0) {
+        return [];
+    }
+    const query = `
+        SELECT DISTINCT u.user_id, u.full_name, u.position
+        FROM users u
+        JOIN user_organizations uo ON u.user_id = uo.user_id
+        WHERE uo.org_id = ANY($1::int[]) AND u.user_id != $2;
+    `;
+    const { rows } = await pool.query(query, [managedOrgIds, delegatorUserId]);
+    return rows;
+};
+
+// Thực hiện ủy quyền tham dự
+const createDelegation = async (meetingId, delegatorUserId, delegateToUserId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Cập nhật trạng thái của người ủy quyền (Lãnh đạo)
+        const updateDelegatorQuery = `
+            UPDATE meeting_attendees
+            SET status = 'delegated', represented_by_user_id = $1
+            WHERE meeting_id = $2 AND user_id = $3;
+        `;
+        await client.query(updateDelegatorQuery, [delegateToUserId, meetingId, delegatorUserId]);
+
+        // 2. Thêm người được ủy quyền vào danh sách tham dự (nếu họ chưa có)
+        // Hoặc cập nhật nếu họ đã được mời từ trước với vai trò khác
+        const upsertDelegateQuery = `
+            INSERT INTO meeting_attendees (meeting_id, user_id, status)
+            VALUES ($1, $2, 'pending')
+            ON CONFLICT (meeting_id, user_id) DO UPDATE SET status = 'pending';
+        `;
+        await client.query(upsertDelegateQuery, [meetingId, delegateToUserId]);
+
+        await client.query('COMMIT');
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
 
 module.exports = { 
   findForUser, 
@@ -393,4 +447,7 @@ module.exports = {
   findOrCreateQrToken,
   checkInWithQr,
   getAttendanceStats,
+  getManagedOrgIds,
+  getDelegationCandidates,
+  createDelegation
 };
