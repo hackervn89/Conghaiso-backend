@@ -95,11 +95,24 @@ const create = async (meetingData, creatorId) => {
           const agendaQuery = `INSERT INTO agendas (meeting_id, title, display_order) VALUES ($1, $2, $3) RETURNING agenda_id;`;
           const agendaResult = await client.query(agendaQuery, [newMeeting.meeting_id, agendaItem.title, index + 1]);
           const newAgendaId = agendaResult.rows[0].agenda_id;
+
           if (agendaItem.documents && agendaItem.documents.length > 0) {
             for (const doc of agendaItem.documents) {
-              if (doc.name && doc.name.trim() !== '' && doc.filePath) {
+              // Check for tempPath, which indicates a new file to be moved.
+              if (doc.tempPath) {
+                const finalRelativePath = await storageService.moveFileToMeetingFolder(
+                  doc.tempPath,
+                  newMeeting.meeting_id,
+                  newMeeting.start_time
+                );
+                
                 const docQuery = `INSERT INTO documents (agenda_id, doc_name, file_path) VALUES ($1, $2, $3);`;
-                await client.query(docQuery, [newAgendaId, doc.name, doc.filePath]);
+                await client.query(docQuery, [newAgendaId, doc.doc_name, finalRelativePath]);
+              }
+              // This part handles documents that might already have a path (e.g. when copying a meeting, not implemented yet but good to have)
+              else if (doc.filePath) {
+                 const docQuery = `INSERT INTO documents (agenda_id, doc_name, file_path) VALUES ($1, $2, $3);`;
+                 await client.query(docQuery, [newAgendaId, doc.doc_name, doc.filePath]);
               }
             }
           }
@@ -108,7 +121,10 @@ const create = async (meetingData, creatorId) => {
     }
     
     await client.query('COMMIT');
-    return newMeeting;
+    // We need to return the full meeting with the new file paths
+    const fullMeeting = await findById(newMeeting.meeting_id, { user_id: creatorId, role: 'Admin' }); // Assume creator has admin rights to view
+    return fullMeeting;
+
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

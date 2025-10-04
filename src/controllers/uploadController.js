@@ -2,15 +2,8 @@ const storageService = require('../services/storageService');
 
 const uploadDocument = async (req, res) => {
   try {
-    const { entityId } = req.body;
-
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'Vui lòng chọn ít nhất một file để tải lên.' });
-    }
-
-    // entityId là bắt buộc để đặt tệp vào đúng thư mục.
-    if (!entityId) {
-        return res.status(400).json({ message: 'Yêu cầu phải có entityId (ví dụ: meetingId, taskId).' });
     }
 
     // Sửa lỗi mã hóa tên tệp từ latin1 (mặc định của multer) sang utf8
@@ -22,27 +15,26 @@ const uploadDocument = async (req, res) => {
       };
     });
 
-    // Sử dụng storageService mới để lưu tệp cục bộ
+    // Lưu tệp vào thư mục tạm
     const uploadPromises = decodedFiles.map(file => 
-        storageService.saveFileToEntityFolder(file, entityId)
+        storageService.saveFileToTempFolder(file)
     );
-    const savedFilePaths = await Promise.all(uploadPromises);
+    const tempFilePaths = await Promise.all(uploadPromises);
     
-    // Thông tin trả về cho client
+    // Trả về thông tin tệp tạm thời cho client
     const filesInfo = decodedFiles.map((file, index) => ({
-      filePath: savedFilePaths[index], // Đường dẫn tương đối trên server
-      name: file.originalname,       // Tên gốc của tệp
+      filePath: tempFilePaths[index], // Sửa thành filePath để nhất quán với frontend đang mong đợi
+      name: file.originalname,        // Tên gốc của tệp
     }));
 
     res.status(201).json({
-      message: `Tải lên thành công ${filesInfo.length} file!`,
+      message: `Tải lên thành công ${filesInfo.length} file vào thư mục tạm!`,
       files: filesInfo,
     });
   } catch (error) {
-    console.error('Lỗi khi tải file lên:', error);
+    console.error('Lỗi khi tải file lên thư mục tạm:', error);
     res.status(500).json({ message: 'Đã có lỗi xảy ra trên server khi tải tệp lên.' });
   }
 };
 
 module.exports = { uploadDocument };
-

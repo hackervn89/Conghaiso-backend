@@ -110,7 +110,6 @@ module.exports = {
   updateUser,
   deleteUser,
   getUsersGrouped,
-  getColleagues,
+  getColleagues, // Thêm hàm mới vào module exports
   savePushToken,
 };
-
