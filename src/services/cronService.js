@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const db = require('../config/database');
 const notificationService = require('./notificationService');
+const draftModel = require('../models/draftModel'); // Thêm model dự thảo
 
 /**
  * Hàm này sẽ tìm tất cả các cuộc họp diễn ra trong ngày hôm nay 
@@ -65,19 +66,55 @@ const sendDailyReminders = async () => {
     console.log(`[CronJob] Đã gửi và đánh dấu xong ${remindedMeetingIds.length} cuộc họp.`);
 };
 
+// === TÁC VỤ MỚI: CẬP NHẬT DỰ THẢO QUÁ HẠN ===
+const processOverdueDrafts = async () => {
+    console.log('[CronJob] Bắt đầu quét các dự thảo quá hạn...');
+    try {
+        const overdueDrafts = await draftModel.updateOverdueDrafts();
+
+        if (overdueDrafts.length === 0) {
+            console.log('[CronJob] Không có dự thảo nào bị quá hạn.');
+            return;
+        }
+
+        console.log(`[CronJob] Tìm thấy ${overdueDrafts.length} dự thảo quá hạn. Bắt đầu gửi thông báo...`);
+
+        // (Nâng cao) Gửi thông báo cho người tạo
+        for (const draft of overdueDrafts) {
+            const creatorId = draft.creator_id;
+            // Giả sử userModel có hàm findPushTokensByUserIds
+            const userModel = require('../models/userModel');
+            const pushTokens = await userModel.findPushTokensByUserIds([creatorId]);
+            if (pushTokens.length > 0) {
+                notificationService.sendPushNotifications(
+                    pushTokens,
+                    'Dự thảo đã quá hạn góp ý',
+                    `Luồng góp ý cho dự thảo "${draft.title}" đã kết thúc.`,
+                    { type: 'draft_overdue', draftId: draft.id }
+                );
+            }
+        }
+        console.log(`[CronJob] Đã xử lý và thông báo cho ${overdueDrafts.length} dự thảo quá hạn.`);
+    } catch (error) {
+        console.error('[CronJob] Lỗi khi xử lý dự thảo quá hạn:', error);
+    }
+};
 
 // Hàm khởi tạo cron job
 const initializeCronJobs = () => {
     // Cấu hình chạy vào lúc 7:00 sáng mỗi ngày
-    // Cú pháp: (phút) (giờ) (ngày trong tháng) (tháng) (ngày trong tuần)
-    cron.schedule('0 7 * * *', () => {
-        sendDailyReminders();
-    }, {
+    cron.schedule('0 7 * * *', sendDailyReminders, {
         scheduled: true,
         timezone: "Asia/Ho_Chi_Minh" // Đặt múi giờ Việt Nam
     });
-
     console.log('[CronJob] Đã lên lịch tác vụ nhắc nhở hàng ngày vào 7:00 sáng.');
+
+    // Cấu hình chạy vào lúc 00:01 mỗi ngày để kiểm tra dự thảo quá hạn
+    cron.schedule('1 0 * * *', processOverdueDrafts, {
+        scheduled: true,
+        timezone: "Asia/Ho_Chi_Minh"
+    });
+    console.log('[CronJob] Đã lên lịch tác vụ kiểm tra dự thảo quá hạn vào 00:01 mỗi ngày.');
 };
 
 module.exports = { initializeCronJobs };

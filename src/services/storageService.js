@@ -85,6 +85,41 @@ const moveFileToMeetingFolder = async (tempRelativePath, meetingId, meetingDate)
     }
 };
 
+/**
+ * Di chuyển một tệp từ vị trí tạm thời đến thư mục dự thảo của nó.
+ * @param {object} file - Đối tượng tệp từ multer đã được decode.
+ * @returns {Promise<string>} - Đường dẫn tương đối cuối cùng của tệp.
+ */
+const moveFileToDraftFolder = async (file) => {
+    const tempRelativePath = await saveFileToTempFolder(file);
+
+    if (!tempRelativePath || !tempRelativePath.startsWith(TEMP_DIR)) {
+        throw new Error("Đường dẫn tệp tạm thời không hợp lệ.");
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+
+    const sanitizedFilename = path.basename(file.originalname);
+
+    // Cấu trúc thư mục mới: drafts/yyyy/mm/tên_file_gốc
+    const newRelativeDir = path.join('drafts', String(year), month);
+    const finalRelativePath = path.join(newRelativeDir, sanitizedFilename).replace(/\\/g, '/');
+
+    const sourceAbsolutePath = getAbsolutePath(tempRelativePath);
+    const destAbsolutePath = getAbsolutePath(finalRelativePath);
+
+    try {
+        await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
+        await fs.rename(sourceAbsolutePath, destAbsolutePath);
+        return finalRelativePath;
+    } catch (error) {
+        console.error(`Lỗi khi di chuyển tệp dự thảo từ ${tempRelativePath}:`, error);
+        throw error;
+    }
+};
+
 
 /**
  * Xóa một tệp dựa trên đường dẫn tương đối của nó trong thư mục lưu trữ.
@@ -114,6 +149,7 @@ const deleteFile = async (relativeFilePath) => {
 module.exports = {
     saveFileToTempFolder,
     moveFileToMeetingFolder,
+    moveFileToDraftFolder,
     deleteFile,
     STORAGE_BASE_PATH,
 };
