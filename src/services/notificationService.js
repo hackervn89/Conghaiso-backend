@@ -1,5 +1,6 @@
 const { Expo } = require('expo-server-sdk');
 const path = require('path');
+const userModel = require('../models/userModel'); // Thêm userModel
 const fs = require('fs');
 
 // Đường dẫn đến file "chìa khóa" Firebase V1
@@ -97,4 +98,25 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
     }
 };
 
-module.exports = { sendPushNotifications };
+/**
+ * Hàm tổng hợp để gửi thông báo đến một danh sách user ID.
+ * @param {number[]} userIds - Mảng các user_id cần gửi thông báo.
+ * @param {object} notification - Đối tượng thông báo { title, body, data }.
+ */
+const sendNotification = async (userIds, notification) => {
+    if (!userIds || userIds.length === 0) {
+        return;
+    }
+
+    try {
+        const pushTokens = await userModel.findPushTokensByUserIds(userIds);
+        if (pushTokens.length > 0) {
+            await sendPushNotifications(pushTokens, notification.title, notification.body, notification.data);
+        }
+    } catch (error) {
+        console.error(`[NotificationService] Lỗi khi gửi thông báo cho userIds ${userIds}:`, error);
+    }
+};
+
+
+module.exports = { sendPushNotifications, sendNotification };

@@ -35,17 +35,17 @@ const createDraft = async (req, res) => {
 
         const newDraft = await draftModel.create(draftData, fileInfo, creatorId);
 
-        // 5. Send notifications
+        // 5. Gửi thông báo
         if (participantIds.length > 0) {
-            const pushTokens = await userModel.findPushTokensByUserIds(participantIds);
-            if (pushTokens.length > 0) {
-                notificationService.sendPushNotifications(
-                    pushTokens,
-                    'Thư mời góp ý dự thảo',
-                    `Bạn được mời góp ý cho dự thảo: "${newDraft.title}"`,
-                    { type: 'new_draft', draftId: newDraft.id }
-                );
-            }
+            // Gọi service thông báo ngay tại controller
+            notificationService.sendNotification(
+                participantIds,
+                {
+                    title: 'Thư mời góp ý dự thảo',
+                    body: `Bạn được mời góp ý cho dự thảo: "${newDraft.title}"`,
+                    data: { type: 'new_draft', draftId: newDraft.id }
+                }
+            );
         }
 
         res.status(201).json({ message: 'Tạo luồng góp ý thành công!', draft: newDraft });
