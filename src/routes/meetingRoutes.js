@@ -10,8 +10,7 @@ const {
     getAttendanceStats,
     updateAttendance,
     getQrCodeToken,
-    checkInWithQr,
-    // Thêm 2 hàm mới từ controller
+    checkInWithQr,    
     getDelegationCandidates,
     delegateAttendance,
 } = require('../controllers/meetingController');
