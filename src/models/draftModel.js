@@ -1,31 +1,57 @@
 const db = require('../config/database');
 const crypto = require('crypto');
+const storageService = require('../services/storageService');
 
-const create = async (draftData, fileInfo, creatorId) => {
-    const { title, document_number, participants, deadline } = draftData;
+const create = async (draftData, files) => {
+    const { title, document_number, participants, deadline, creatorId } = draftData;
     const client = await db.getClient();
+    const savedFilePaths = []; // Mảng để theo dõi các tệp đã lưu
+
     try {
         await client.query('BEGIN');
 
+        // Bước 1: Tạo bản ghi draft chính (không có thông tin file) để lấy ID
         const draftQuery = `
-            INSERT INTO draft_documents (title, document_number, file_name, file_path, creator_id, deadline, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 'dang_lay_y_kien')
-            RETURNING id, title, creator_id, deadline, created_at;
+            INSERT INTO draft_documents (title, document_number, creator_id, deadline, status)
+            VALUES ($1, $2, $3, $4, 'dang_lay_y_kien')
+            RETURNING id, title;
         `;
-        const draftResult = await client.query(draftQuery, [title, document_number, fileInfo.fileName, fileInfo.filePath, creatorId, deadline]);
+        const draftResult = await client.query(draftQuery, [title, document_number, creatorId, deadline]);
         const newDraft = draftResult.rows[0];
+        const draftId = newDraft.id;
 
+        // Bước 2: Lặp qua các tệp, lưu chúng và ghi vào bảng draft_attachments
+        if (files && files.length > 0) {
+            for (const file of files) {
+                // Lưu tệp vật lý
+                const relativePath = await storageService.saveDraftAttachment(file, draftId);
+                savedFilePaths.push(relativePath); // Thêm vào danh sách để rollback nếu cần
+
+                // Lưu thông tin tệp vào CSDL
+                const attachmentQuery = `
+                    INSERT INTO draft_attachments (draft_id, file_name, file_path)
+                    VALUES ($1, $2, $3);
+                `;
+                await client.query(attachmentQuery, [draftId, file.originalname, relativePath]);
+            }
+        }
+
+        // Bước 3: Thêm người tham gia
         if (participants && participants.length > 0) {
-            const participantValues = participants.map(pId => `(${newDraft.id}, ${pId})`).join(',');
+            const participantValues = participants.map(pId => `(${draftId}, ${pId})`).join(',');
             const participantQuery = `INSERT INTO draft_participants (draft_id, user_id) VALUES ${participantValues};`;
             await client.query(participantQuery);
         }
 
         await client.query('COMMIT');
-        return newDraft;
+        // Trả về thông tin cần thiết cho controller
+        return { draft_id: draftId, title: newDraft.title };
     } catch (error) {
         await client.query('ROLLBACK');
-        throw error;
+        // Nếu có lỗi, tạo một lỗi mới chứa thông tin các tệp đã lưu để controller có thể xóa chúng
+        const cleanupError = new Error(error.message);
+        cleanupError.savedFiles = savedFilePaths;
+        throw cleanupError;
     } finally {
         client.release();
     }
@@ -67,8 +93,6 @@ const findById = async (id, userId) => {
         SELECT
             dd.id,
             dd.title,
-            dd.file_name,
-            dd.file_path,
             u.full_name AS creator_name,
             dd.creator_id,
             dd.deadline,
@@ -82,6 +106,18 @@ const findById = async (id, userId) => {
         return null; // Not found, though access check should have caught this
     }
     const draft = draftResult.rows[0];
+
+    // Lấy danh sách các tệp đính kèm từ bảng mới và đặt bí danh cho cột 'id'
+    const attachmentsQuery = `
+        SELECT
+            id AS attachment_id,
+            file_name,
+            file_path
+        FROM draft_attachments
+        WHERE draft_id = $1;
+    `;
+    const attachmentsResult = await db.query(attachmentsQuery, [id]);
+    draft.attachments = attachmentsResult.rows;
 
     // Fetch participants
     const participantsQuery = `
@@ -170,6 +206,33 @@ const updateOverdueDrafts = async () => {
     return rows;
 };
 
+/**
+ * Xóa một dự thảo và tất cả các dữ liệu liên quan (góp ý, người tham gia, tệp đính kèm).
+ * @param {number} draftId ID của dự thảo cần xóa.
+ * @returns {Promise<string[]>} Mảng các đường dẫn tệp đính kèm cần xóa khỏi hệ thống tệp.
+ */
+const remove = async (draftId) => {
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+
+        // Bước 1: Lấy danh sách các tệp đính kèm để xóa sau khi transaction thành công.
+        const attachmentsQuery = `SELECT file_path FROM draft_attachments WHERE draft_id = $1 AND file_path IS NOT NULL`;
+        const attachmentsResult = await client.query(attachmentsQuery, [draftId]);
+        const filePathsToDelete = attachmentsResult.rows.map(row => row.file_path);
+
+        // Bước 2: Xóa bản ghi dự thảo chính. Các bản ghi liên quan sẽ được xóa theo (ON DELETE CASCADE).
+        await client.query('DELETE FROM draft_documents WHERE id = $1', [draftId]);
+
+        await client.query('COMMIT');
+        return filePathsToDelete;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
 
 module.exports = {
     create,
@@ -180,4 +243,5 @@ module.exports = {
     addComment,
     agree,
     updateOverdueDrafts,
+    remove,
 };

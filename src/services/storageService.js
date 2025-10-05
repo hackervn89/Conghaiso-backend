@@ -41,6 +41,31 @@ const saveFileToTempFolder = async (file) => {
 };
 
 /**
+ * Di chuyển một tệp từ đường dẫn tạm thời đến một đường dẫn đích cuối cùng.
+ * Đây là hàm nội bộ, được sử dụng bởi các hàm di chuyển file khác.
+ * @param {string} tempRelativePath - Đường dẫn tương đối của tệp trong thư mục tạm.
+ * @param {string} finalRelativePath - Đường dẫn tương đối cuối cùng của tệp.
+ * @returns {Promise<string>} - Đường dẫn tương đối cuối cùng của tệp.
+ */
+const moveFileFromTemp = async (tempRelativePath, finalRelativePath) => {
+    if (!tempRelativePath || !tempRelativePath.startsWith(TEMP_DIR)) {
+        throw new Error("Đường dẫn tệp tạm thời không hợp lệ.");
+    }
+
+    const sourceAbsolutePath = getAbsolutePath(tempRelativePath);
+    const destAbsolutePath = getAbsolutePath(finalRelativePath);
+
+    try {
+        await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
+        await fs.rename(sourceAbsolutePath, destAbsolutePath);
+        return finalRelativePath;
+    } catch (error) {
+        console.error(`Lỗi khi di chuyển tệp từ ${tempRelativePath} đến ${finalRelativePath}:`, error);
+        throw error;
+    }
+};
+
+/**
  * Di chuyển một tệp từ vị trí tạm thời đến thư mục cuối cùng của nó.
  * @param {string} tempRelativePath - Đường dẫn tương đối của tệp trong thư mục tạm.
  * @param {string|number} meetingId - ID của cuộc họp.
@@ -48,76 +73,48 @@ const saveFileToTempFolder = async (file) => {
  * @returns {Promise<string>} - Đường dẫn tương đối cuối cùng của tệp.
  */
 const moveFileToMeetingFolder = async (tempRelativePath, meetingId, meetingDate) => {
-    if (!tempRelativePath || !tempRelativePath.startsWith(TEMP_DIR)) {
-        throw new Error("Đường dẫn tệp tạm thời không hợp lệ.");
-    }
-
     // Chuyển đổi sang múi giờ Việt Nam để đảm bảo ngày tháng chính xác
     const date = new Date(meetingDate); // meetingDate là chuỗi ISO từ DB
     const options = { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' };
     const parts = new Intl.DateTimeFormat('en-GB', options).formatToParts(date);
     const { day, month, year } = Object.fromEntries(parts.map(p => [p.type, p.value]));
 
-    // Lấy lại tên tệp gốc từ đường dẫn tạm thời
-    const originalFilename = path.basename(tempRelativePath).split('-').slice(2).join('-');
-    const sanitizedFilename = path.basename(originalFilename);
+    const sanitizedFilename = path.basename(tempRelativePath).split('-').slice(2).join('-');
 
-    // Cấu trúc thư mục mới theo yêu cầu: meetings/dd-mm-yyyy-meeting_id/tên_file
-    const folderName = `${day}-${month}-${year}-${meetingId}`;
-    const newRelativeDir = path.join('meetings', folderName);
-    const finalRelativePath = path.join(newRelativeDir, sanitizedFilename).replace(/\\/g, '/');
-
-    const sourceAbsolutePath = getAbsolutePath(tempRelativePath);
-    const destAbsolutePath = getAbsolutePath(finalRelativePath);
-
-    try {
-        await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
-        await fs.rename(sourceAbsolutePath, destAbsolutePath);
-        return finalRelativePath;
-    } catch (error) {
-        if (error.code === 'ENOENT') {
-            console.warn(`Tệp tạm thời không tìm thấy để di chuyển: ${tempRelativePath}. Có thể nó đã được xử lý.`);
-            // Trả về đường dẫn cuối cùng như thể nó đã thành công, để không làm gián đoạn luồng
-            return finalRelativePath;
-        }
-        console.error(`Lỗi khi di chuyển tệp từ ${tempRelativePath}:`, error);
-        throw error;
-    }
+    // Cấu trúc thư mục mới: meetings/mm-yyyy/meeting_id/tên_file
+    const dateFolder = `${month}-${year}`;
+    const finalRelativePath = path.join('meetings', dateFolder, String(meetingId), sanitizedFilename).replace(/\\/g, '/');
+    
+    return await moveFileFromTemp(tempRelativePath, finalRelativePath);
 };
 
 /**
- * Di chuyển một tệp từ vị trí tạm thời đến thư mục dự thảo của nó.
- * @param {object} file - Đối tượng tệp từ multer đã được decode.
+ * Lưu một tệp đính kèm cho dự thảo vào thư mục cuối cùng của nó.
+ * Cấu trúc thư mục: drafts/YYYY/MM/draftId/filename
+ * @param {object} file - Đối tượng tệp từ multer (đã được decode tên).
+ * @param {number} draftId - ID của dự thảo.
  * @returns {Promise<string>} - Đường dẫn tương đối cuối cùng của tệp.
  */
-const moveFileToDraftFolder = async (file) => {
-    const tempRelativePath = await saveFileToTempFolder(file);
-
-    if (!tempRelativePath || !tempRelativePath.startsWith(TEMP_DIR)) {
-        throw new Error("Đường dẫn tệp tạm thời không hợp lệ.");
+const saveDraftAttachment = async (file, draftId) => {
+    if (!STORAGE_BASE_PATH) {
+        throw new Error("STORAGE_PATH chưa được cấu hình.");
     }
-
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
 
+    const dateFolder = `${month}-${year}`; // Tạo thư mục theo định dạng MM-YYYY
     const sanitizedFilename = path.basename(file.originalname);
 
-    // Cấu trúc thư mục mới: drafts/yyyy/mm/tên_file_gốc
-    const newRelativeDir = path.join('drafts', String(year), month);
+    // Cấu trúc thư mục mới: drafts/mm-yyyy/draft_id/tên_file_gốc
+    const newRelativeDir = path.join('drafts', dateFolder, String(draftId));
     const finalRelativePath = path.join(newRelativeDir, sanitizedFilename).replace(/\\/g, '/');
 
-    const sourceAbsolutePath = getAbsolutePath(tempRelativePath);
     const destAbsolutePath = getAbsolutePath(finalRelativePath);
 
-    try {
-        await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
-        await fs.rename(sourceAbsolutePath, destAbsolutePath);
-        return finalRelativePath;
-    } catch (error) {
-        console.error(`Lỗi khi di chuyển tệp dự thảo từ ${tempRelativePath}:`, error);
-        throw error;
-    }
+    await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
+    await fs.writeFile(destAbsolutePath, file.buffer);
+    return finalRelativePath;
 };
 
 
@@ -132,8 +129,12 @@ const deleteFile = async (relativeFilePath) => {
         const safeRelativePath = path.normalize(relativeFilePath).replace(/^(\.\.[\/\\])|([\/\\].\.)/g, '');
         const absoluteFilePath = getAbsolutePath(safeRelativePath);
 
-        if (!absoluteFilePath.startsWith(STORAGE_BASE_PATH)) {
-             console.error(`[SECURITY] Cố gắng xóa tệp bên ngoài đường dẫn lưu trữ: ${relativeFilePath}`);
+        // Lấy đường dẫn tuyệt đối, đã được chuẩn hóa của thư mục gốc và tệp cần xóa.
+        const resolvedBasePath = path.resolve(STORAGE_BASE_PATH);
+        const resolvedFilePath = path.resolve(absoluteFilePath);
+
+        if (!resolvedFilePath.startsWith(resolvedBasePath)) {
+             console.error(`[SECURITY] Cố gắng xóa tệp bên ngoài đường dẫn lưu trữ: ${resolvedFilePath}`);
              return;
         }
 
@@ -146,10 +147,40 @@ const deleteFile = async (relativeFilePath) => {
     }
 };
 
+/**
+ * Xóa một thư mục (và các thư mục cha rỗng của nó).
+ * @param {string} relativeDirPath - Đường dẫn tương đối của thư mục cần xóa.
+ */
+const deleteDirectory = async (relativeDirPath) => {
+    if (!relativeDirPath || !STORAGE_BASE_PATH) return;
+
+    try {
+        const absoluteDirPath = getAbsolutePath(relativeDirPath);
+
+        // Kiểm tra bảo mật để đảm bảo không xóa thư mục ngoài phạm vi cho phép
+        const resolvedBasePath = path.resolve(STORAGE_BASE_PATH);
+        const resolvedDirPath = path.resolve(absoluteDirPath);
+
+        if (!resolvedDirPath.startsWith(resolvedBasePath) || resolvedDirPath === resolvedBasePath) {
+            console.error(`[SECURITY] Cố gắng xóa thư mục bên ngoài hoặc thư mục gốc: ${resolvedDirPath}`);
+            return;
+        }
+
+        // Xóa thư mục và tất cả nội dung bên trong nó (recursive: true)
+        // và thử lại nếu gặp lỗi (retry) trên Windows
+        await fs.rm(absoluteDirPath, { recursive: true, force: true });
+        console.log(`[Storage] Đã xóa thư mục: ${absoluteDirPath}`);
+    } catch (error) {
+        console.error(`[Storage] Lỗi khi xóa thư mục ${relativeDirPath}:`, error);
+    }
+};
+
 module.exports = {
     saveFileToTempFolder,
     moveFileToMeetingFolder,
-    moveFileToDraftFolder,
+    // Hàm moveFileFromTemp là hàm nội bộ, không cần export
+    saveDraftAttachment,
     deleteFile,
+    deleteDirectory,
     STORAGE_BASE_PATH,
 };

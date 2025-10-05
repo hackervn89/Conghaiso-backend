@@ -1,6 +1,8 @@
 const meetingModel = require('../models/meetingModel');
 const userModel = require('../models/userModel');
 const notificationService = require('../services/notificationService');
+const storageService = require('../services/storageService');
+const path = require('path');
 const qrcode = require('qrcode');
 const redis = require('../services/redisService');
 
@@ -148,13 +150,20 @@ const deleteMeeting = async (req, res) => {
     if (!hasPermission) {
       return res.status(403).json({ message: 'Không có quyền xóa cuộc họp này.' });
     }
-    const deletedMeeting = await meetingModel.remove(meetingId);
+    const { deletedMeeting, filesToDelete } = await meetingModel.remove(meetingId);
 
     // Invalidate cache in Redis
     await redis.del(cacheKey);
     console.log(`Cache invalidated in Redis for meeting: ${meetingId}`);
 
-    res.status(200).json({ message: `Đã xóa thành công cuộc họp: ${deletedMeeting.title}` });
+    // Sau khi xóa trong CSDL, xóa thư mục chứa tệp đính kèm
+    if (filesToDelete && filesToDelete.length > 0) {
+      const meetingDirectory = path.dirname(filesToDelete[0]);
+      console.log(`[Meeting Deletion] Bắt đầu dọn dẹp thư mục và các tệp đính kèm: ${meetingDirectory}`);
+      await storageService.deleteDirectory(meetingDirectory);
+    }
+
+    res.status(200).json({ message: `Đã xóa thành công cuộc họp: "${deletedMeeting.title}"` });
   } catch (error) {
     console.error('Lỗi khi xóa cuộc họp:', error);
     res.status(500).json({ message: 'Lỗi server.' });

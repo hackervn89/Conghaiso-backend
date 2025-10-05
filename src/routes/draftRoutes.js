@@ -8,8 +8,8 @@ const multer = require('multer');
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// Endpoint 1: Tạo Luồng Góp Ý Mới
-router.post('/', authenticate, upload.single('document'), draftController.createDraft);
+// Endpoint 1: Tạo Luồng Góp Ý Mới (hỗ trợ nhiều tài liệu)
+router.post('/', authenticate, upload.array('documents', 10), draftController.createDraft);
 
 // Endpoint 2: Lấy Danh Sách Dự Thảo
 router.get('/', authenticate, draftController.getDrafts);
@@ -22,6 +22,9 @@ router.post('/:id/comment', authenticate, draftController.addComment);
 
 // Endpoint 5: Xác Nhận "Thống Nhất"
 router.post('/:id/agree', authenticate, draftController.agreeToDraft);
+
+// Endpoint 6: Xóa một Luồng Góp Ý
+router.delete('/:id', authenticate, draftController.deleteDraft);
 
 
 module.exports = router;

@@ -2,6 +2,7 @@ const path = require('path');
 const db = require('../config/database');
 const meetingModel = require('../models/meetingModel');
 const taskModel = require('../models/taskModel');
+const draftModel = require('../models/draftModel'); // Thêm draftModel
 
 const STORAGE_BASE_PATH = process.env.STORAGE_PATH;
 
@@ -40,6 +41,16 @@ const serveFile = async (req, res) => {
             if (docs.length > 0) {
                 entityType = 'task';
                 entityId = docs[0].task_id;
+            } else {
+                // Nếu không, kiểm tra xem có phải là tài liệu góp ý không
+                ({ rows: docs } = await db.query(
+                    `SELECT draft_id FROM draft_attachments WHERE file_path = $1`,
+                    [relativeFilePath]
+                ));
+                if (docs.length > 0) {
+                    entityType = 'draft';
+                    entityId = docs[0].draft_id;
+                }
             }
         }
 
@@ -62,6 +73,11 @@ const serveFile = async (req, res) => {
                 if (user.role === 'Admin' || isCreator || isTracker) {
                     hasPermission = true;
                 }
+            }
+        } else if (entityType === 'draft') {
+            const draft = await draftModel.findById(entityId, user.user_id);
+            if (draft) { // findById đã có sẵn logic kiểm tra quyền
+                hasPermission = true;
             }
         }
 

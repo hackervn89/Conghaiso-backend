@@ -219,17 +219,16 @@ const remove = async (id) => {
     WHERE a.meeting_id = $1 AND d.file_path IS NOT NULL;
   `;
   const { rows: documentsToDelete } = await db.query(docsQuery, [id]);
+  const filePathsToDelete = documentsToDelete.map(doc => doc.file_path);
 
   const { rows } = await db.query('DELETE FROM meetings WHERE meeting_id = $1 RETURNING *;', [id]);
   const deletedMeeting = rows[0];
 
-  if (deletedMeeting && documentsToDelete.length > 0) {
-    console.log(`[Storage] Deleting ${documentsToDelete.length} files for deleted meeting ${id}...`);
-    const deletePromises = documentsToDelete.map(doc => storageService.deleteFile(doc.file_path));
-    await Promise.all(deletePromises);
-  }
-
-  return deletedMeeting;
+  // Trả về cả thông tin cuộc họp đã xóa và danh sách tệp để controller xử lý
+  return {
+    deletedMeeting,
+    filesToDelete: filePathsToDelete
+  };
 };
 
 // --- Other functions remain unchanged ---
