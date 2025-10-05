@@ -6,16 +6,23 @@ const findById = async (id, user) => {
     SELECT
       m.*,
       (
-        SELECT json_agg(json_build_object(
-          'user_id', u.user_id,
-          'full_name', u.full_name,
-          'role', u.role,
-          'status', ma.status,
-          'check_in_time', ma.check_in_time
-        ))
+        SELECT COALESCE(json_agg(
+          json_build_object(
+            'user_id', u.user_id,
+            'full_name', u.full_name,
+            'role', u.role,
+            'status', ma.status,
+            'check_in_time', ma.check_in_time,
+            'represented_by_user_id', ma.represented_by_user_id,
+            'represented_by_user_name', ru.full_name,
+            'is_delegated', ma.is_delegated,
+            'is_leader', EXISTS (SELECT 1 FROM organization_leaders ol WHERE ol.user_id = u.user_id)
+          )), '[]'::json)
         FROM meeting_attendees ma
+        LEFT JOIN users ru ON ma.represented_by_user_id = ru.user_id
         JOIN users u ON ma.user_id = u.user_id
         WHERE ma.meeting_id = m.meeting_id
+          AND u.role != 'Admin' -- Loại trừ Admin khỏi danh sách hiển thị
       ) AS attendees,
       (
         SELECT json_agg(ag)
@@ -307,7 +314,7 @@ const updateSingleAttendance = async (meetingId, userId, status) => {
 const getAttendanceStats = async (meetingId) => {
     const query = `
         SELECT
-            COUNT(*) AS total_summoned,
+            COUNT(*) FILTER (WHERE ma.status != 'delegated') AS total_summoned,
             COUNT(*) FILTER (WHERE ma.status = 'present') AS total_present,
             COUNT(*) FILTER (WHERE ma.status = 'absent') AS total_absent,
             COUNT(*) FILTER (WHERE ma.status = 'absent_with_reason') AS total_absent_with_reason
@@ -384,7 +391,7 @@ const checkInWithQr = async (meetingId, token, userId) => {
 // Lấy danh sách các đơn vị mà một user là lãnh đạo
 const getManagedOrgIds = async (userId) => {
     const query = 'SELECT org_id FROM organization_leaders WHERE user_id = $1';
-    const { rows } = await pool.query(query, [userId]);
+    const { rows } = await db.query(query, [userId]);
     return rows.map(row => row.org_id);
 };
 
@@ -399,13 +406,13 @@ const getDelegationCandidates = async (managedOrgIds, delegatorUserId) => {
         JOIN user_organizations uo ON u.user_id = uo.user_id
         WHERE uo.org_id = ANY($1::int[]) AND u.user_id != $2;
     `;
-    const { rows } = await pool.query(query, [managedOrgIds, delegatorUserId]);
+    const { rows } = await db.query(query, [managedOrgIds, delegatorUserId]);
     return rows;
 };
 
 // Thực hiện ủy quyền tham dự
 const createDelegation = async (meetingId, delegatorUserId, delegateToUserId) => {
-    const client = await pool.connect();
+    const client = await db.getClient();
     try {
         await client.query('BEGIN');
 
@@ -413,16 +420,23 @@ const createDelegation = async (meetingId, delegatorUserId, delegateToUserId) =>
         const updateDelegatorQuery = `
             UPDATE meeting_attendees
             SET status = 'delegated', represented_by_user_id = $1
-            WHERE meeting_id = $2 AND user_id = $3;
+            WHERE meeting_id = $2 AND user_id = $3
+            RETURNING *;
         `;
-        await client.query(updateDelegatorQuery, [delegateToUserId, meetingId, delegatorUserId]);
+        const delegatorResult = await client.query(updateDelegatorQuery, [delegateToUserId, meetingId, delegatorUserId]);
+        if (delegatorResult.rows.length === 0) {
+            // Người ủy quyền không có trong danh sách mời ban đầu, không thể ủy quyền
+            throw new Error('Người ủy quyền không phải là người tham dự cuộc họp.');
+        }
 
         // 2. Thêm người được ủy quyền vào danh sách tham dự (nếu họ chưa có)
         // Hoặc cập nhật nếu họ đã được mời từ trước với vai trò khác
+        // Đánh dấu is_delegated = true để biết đây là người được ủy quyền
         const upsertDelegateQuery = `
-            INSERT INTO meeting_attendees (meeting_id, user_id, status)
-            VALUES ($1, $2, 'pending')
-            ON CONFLICT (meeting_id, user_id) DO UPDATE SET status = 'pending';
+            INSERT INTO meeting_attendees (meeting_id, user_id, status, is_delegated)
+            VALUES ($1, $2, 'pending', true)
+            ON CONFLICT (meeting_id, user_id) 
+            DO UPDATE SET status = 'pending', is_delegated = true;
         `;
         await client.query(upsertDelegateQuery, [meetingId, delegateToUserId]);
 

@@ -319,7 +319,7 @@ const checkInWithQr = async (req, res) => {
 const getDelegationCandidates = async (req, res) => {
     try {
         const { meetingId } = req.params;
-        const delegatorUserId = req.user.userId; // Lấy từ middleware xác thực
+        const delegatorUserId = req.user.user_id; // Lấy từ middleware xác thực
 
         const managedOrgIds = await meetingModel.getManagedOrgIds(delegatorUserId);
         
@@ -339,13 +339,18 @@ const delegateAttendance = async (req, res) => {
     try {
         const { meetingId } = req.params;
         const { delegateToUserId } = req.body;
-        const delegatorUserId = req.user.userId;
+        const delegatorUserId = req.user.user_id;
+        const cacheKey = `meeting-details:${meetingId}`;
 
         if (!delegateToUserId) {
             return res.status(400).json({ message: 'Vui lòng chọn người được ủy quyền.' });
         }
         
         const result = await meetingModel.createDelegation(meetingId, delegatorUserId, delegateToUserId);
+
+        // Vô hiệu hóa cache cho cuộc họp này để đảm bảo frontend nhận được dữ liệu mới nhất
+        await redis.del(cacheKey);
+        console.log(`Cache invalidated in Redis for meeting after delegation: ${meetingId}`);
 
         res.status(200).json({ message: 'Ủy quyền thành công!', data: result });
     } catch (error) {

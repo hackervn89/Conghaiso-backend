@@ -34,7 +34,7 @@ router.post('/:meetingId/check-in', checkInWithQr);
 
 // --- Routes for Delegation (Chức năng mới) ---
 // Lấy danh sách người có thể được ủy quyền
-router.get('/:meetingId/attendees/me/delegation-candidates', getDelegationCandidates);
+router.get('/:meetingId/delegation-candidates', getDelegationCandidates);
 
 // Thực hiện hành động ủy quyền
 router.post('/:meetingId/attendees/me/delegate', delegateAttendance);
@@ -51,4 +51,3 @@ router.route('/:id')
     .delete(deleteMeeting);
 
 module.exports = router;
-
