@@ -152,7 +152,7 @@ const remove = async (taskId) => {
 };
 
 const findAll = async (user, filters) => {
-    const { dynamicStatus, orgId } = filters;
+    const { dynamicStatus, orgId, searchTerm } = filters;
 
     let mainQuery = `
         SELECT
@@ -200,6 +200,13 @@ const findAll = async (user, filters) => {
     if (orgId) {
         whereClauses.push(`t.task_id IN (SELECT task_id FROM task_assigned_orgs WHERE org_id = $${paramIndex})`);
         params.push(orgId);
+        paramIndex++;
+    }
+
+    // [CẬP NHẬT] Thêm logic lọc theo tên công việc
+    if (searchTerm) {
+        whereClauses.push(`t.title ILIKE $${paramIndex}`);
+        params.push(`%${searchTerm}%`);
         paramIndex++;
     }
 
