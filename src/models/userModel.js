@@ -135,6 +135,19 @@ const getSecretaryScopes = async (userId) => {
   const { rows } = await db.query('SELECT org_id FROM secretary_scopes WHERE user_id = $1', [userId]);
   return rows.map(row => row.org_id);
 };
+
+/**
+ * Lấy danh sách các org_id mà một người dùng là Lãnh đạo.
+ * @param {number} userId ID của người dùng.
+ * @returns {Promise<number[]>} Mảng các org_id.
+ */
+const getLeaderScopes = async (userId) => {
+  const { rows } = await db.query('SELECT org_id FROM organization_leaders WHERE user_id = $1', [userId]);
+  return rows.map(row => row.org_id);
+};
+
+
+
 const updatePushToken = async (userId, token) => {
   const { rows } = await db.query(
     'UPDATE users SET push_token = $1 WHERE user_id = $2 RETURNING user_id, push_token',
@@ -189,6 +202,7 @@ module.exports = {
   update, 
   remove,
   getSecretaryScopes,
+  getLeaderScopes,
   findAllGroupedByOrganization,
   updatePushToken,
   findPushTokensByUserIds,

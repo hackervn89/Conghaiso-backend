@@ -20,8 +20,13 @@ const login = async (req, res) => {
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
 
     let managedScopes = [];
+    // Lấy phạm vi quản lý cho cả Secretary và Leader
     if (user.role === 'Secretary') {
       managedScopes = await userModel.getSecretaryScopes(user.user_id);
+    } else {
+      // Kiểm tra xem người dùng có phải là Leader của đơn vị nào không
+      const leaderScopes = await userModel.getLeaderScopes(user.user_id);
+      if (leaderScopes.length > 0) managedScopes = leaderScopes;
     }
     res.status(200).json({
       message: 'Đăng nhập thành công!',
@@ -64,8 +69,13 @@ const logout = async (req, res) => {
 const getMe = async (req, res) => {
   const user = req.user;
   let managedScopes = [];
+  // Lấy phạm vi quản lý cho cả Secretary và Leader
   if (user.role === 'Secretary') {
     managedScopes = await userModel.getSecretaryScopes(user.user_id);
+  } else {
+    // Kiểm tra xem người dùng có phải là Leader của đơn vị nào không
+    const leaderScopes = await userModel.getLeaderScopes(user.user_id);
+    if (leaderScopes.length > 0) managedScopes = leaderScopes;
   }
   
   // Trả về một đối tượng user đầy đủ, nhất quán với API login
