@@ -55,6 +55,9 @@ const moveFileFromTemp = async (tempRelativePath, finalRelativePath) => {
     const sourceAbsolutePath = getAbsolutePath(tempRelativePath);
     const destAbsolutePath = getAbsolutePath(finalRelativePath);
 
+    console.log(`[Storage Service] Attempting to move file:`);
+    console.log(`  - FROM: ${sourceAbsolutePath}`);
+    console.log(`  - TO:   ${destAbsolutePath}`);
     try {
         await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
         await fs.rename(sourceAbsolutePath, destAbsolutePath);
@@ -86,6 +89,32 @@ const moveFileToMeetingFolder = async (tempRelativePath, meetingId, meetingDate)
     const finalRelativePath = path.join('meetings', dateFolder, String(meetingId), sanitizedFilename).replace(/\\/g, '/');
     
     return await moveFileFromTemp(tempRelativePath, finalRelativePath);
+};
+
+/**
+ * Di chuyển một tệp từ vị trí tạm thời đến thư mục công việc cuối cùng của nó.
+ * @param {string} tempRelativePath - Đường dẫn tương đối của tệp trong thư mục tạm.
+ * @param {string|number} taskId - ID của công việc.
+ * @returns {Promise<string>} - Đường dẫn tương đối cuối cùng của tệp.
+ */
+const moveFileToTaskFolder = async (tempRelativePath, taskId) => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+
+    // SỬA LỖI TRIỆT ĐỂ: Không cố gắng "dọn dẹp" tên file nữa.
+    // Giữ nguyên tên file duy nhất đã được tạo trong thư mục temp.
+    const tempFilename = path.basename(tempRelativePath);
+
+    // Cấu trúc thư mục mới: tasks/YYYY-MM/<taskId>/tên_file
+    const dateFolder = `${year}-${month}`;
+    const finalRelativePath = path.join('tasks', dateFolder, String(taskId), tempFilename).replace(/\\/g, '/');
+
+    await moveFileFromTemp(tempRelativePath, finalRelativePath);
+    return {
+        finalPath: finalRelativePath,
+        originalName: tempFilename.substring(tempFilename.indexOf('-', tempFilename.indexOf('-') + 1) + 1)
+    };
 };
 
 /**
@@ -178,6 +207,7 @@ const deleteDirectory = async (relativeDirPath) => {
 module.exports = {
     saveFileToTempFolder,
     moveFileToMeetingFolder,
+    moveFileToTaskFolder,
     // Hàm moveFileFromTemp là hàm nội bộ, không cần export
     saveDraftAttachment,
     deleteFile,

@@ -182,12 +182,16 @@ const findAllGroupedByOrganization = async () => {
 
 const findColleagues = async (userId) => {
     const query = `
-        SELECT DISTINCT u2.user_id, u2.full_name
-        FROM user_organizations uo1
-        JOIN user_organizations uo2 ON uo1.org_id = uo2.org_id
-        JOIN users u2 ON uo2.user_id = u2.user_id
-        WHERE uo1.user_id = $1 AND uo2.user_id != $1
-        ORDER BY u2.full_name;
+        SELECT u.user_id, u.full_name
+        FROM users u
+        WHERE EXISTS (
+            SELECT 1
+            FROM user_organizations uo
+            WHERE uo.user_id = u.user_id AND uo.org_id IN (
+                SELECT org_id FROM user_organizations WHERE user_id = $1
+            )
+        )
+        ORDER BY u.full_name;
     `;
     const { rows } = await db.query(query, [userId]);
     return rows;

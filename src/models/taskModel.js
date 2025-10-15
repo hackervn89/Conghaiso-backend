@@ -4,7 +4,7 @@ const storageService = require('../services/storageService');
 const create = async (taskData, creatorId) => {
     const { 
         title, description, document_ref, is_direct_assignment, 
-        due_date, priority, assignedOrgIds, trackerIds, documents 
+        due_date, priority, assignedOrgIds, trackerIds
     } = taskData;
 
     const client = await db.getClient();
@@ -25,21 +25,36 @@ const create = async (taskData, creatorId) => {
         }
 
         if (trackerIds && trackerIds.length > 0) {
-            const trackerValues = trackerIds.map(userId => `(${newTask.task_id}, ${userId})`).join(', ');
-            await client.query(`INSERT INTO task_trackers (task_id, user_id) VALUES ${trackerValues};`);
-        }
-
-        if (documents && documents.length > 0) {
-             for (const doc of documents) {
-                if (doc.name && doc.filePath) {
-                    const docQuery = `INSERT INTO task_documents (task_id, doc_name, file_path) VALUES ($1, $2, $3);`;
-                    await client.query(docQuery, [newTask.task_id, doc.name, doc.filePath]);
-                }
+            // Lọc ra các user_id không hợp lệ (null, undefined) để tránh lỗi SQL
+            const validTrackerIds = trackerIds.filter(userId => userId != null);
+            if (validTrackerIds.length > 0) {
+                const trackerValues = validTrackerIds.map(userId => `(${newTask.task_id}, ${userId})`).join(', ');
+                await client.query(`INSERT INTO task_trackers (task_id, user_id) VALUES ${trackerValues};`);
             }
         }
         
         await client.query('COMMIT');
         return findById(newTask.task_id);
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
+const addDocuments = async (taskId, documents) => {
+    if (!documents || documents.length === 0) {
+        return;
+    }
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+        for (const doc of documents) {
+            const docQuery = `INSERT INTO task_documents (task_id, doc_name, file_path) VALUES ($1, $2, $3);`;
+            await client.query(docQuery, [taskId, doc.name, doc.filePath]);
+        }
+        await client.query('COMMIT');
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
@@ -77,7 +92,7 @@ const findById = async (taskId) => {
 const update = async (taskId, taskData) => {
      const { 
         title, description, document_ref, is_direct_assignment, 
-        due_date, priority, assignedOrgIds, trackerIds, documents 
+        due_date, priority, assignedOrgIds, trackerIds, documents
     } = taskData;
 
     const client = await db.getClient();
@@ -105,13 +120,18 @@ const update = async (taskId, taskData) => {
             await client.query(`INSERT INTO task_trackers (task_id, user_id) VALUES ${trackerValues};`);
         }
 
+        // Lấy danh sách các file cũ để so sánh và xóa
         const oldDocsQuery = `SELECT file_path FROM task_documents WHERE task_id = $1 AND file_path IS NOT NULL`;
         const { rows: oldDocs } = await client.query(oldDocsQuery, [taskId]);
-        docsToDelete = oldDocs;
+        const oldFilePaths = oldDocs.map(d => d.file_path);
+        const newFilePaths = documents ? documents.map(d => d.filePath) : [];
+        
+        // Xác định các file cần xóa (có trong danh sách cũ nhưng không có trong danh sách mới)
+        docsToDelete = oldFilePaths.filter(p => !newFilePaths.includes(p));
 
         await client.query('DELETE FROM task_documents WHERE task_id = $1', [taskId]);
-         if (documents && documents.length > 0) {
-             for (const doc of documents) {
+        if (documents && documents.length > 0) {
+            for (const doc of documents) {
                 if (doc.name && doc.filePath) {
                     const docQuery = `INSERT INTO task_documents (task_id, doc_name, file_path) VALUES ($1, $2, $3);`;
                     await client.query(docQuery, [taskId, doc.name, doc.filePath]);
@@ -129,7 +149,7 @@ const update = async (taskId, taskData) => {
 
     if (docsToDelete.length > 0) {
         console.log(`[Storage] Deleting ${docsToDelete.length} old files for updated task ${taskId}...`);
-        const deletePromises = docsToDelete.map(doc => storageService.deleteFile(doc.file_path));
+        const deletePromises = docsToDelete.map(filePath => storageService.deleteFile(filePath));
         await Promise.all(deletePromises).catch(err => console.error("[Storage] Error during old task file cleanup:", err));
     }
 
@@ -313,6 +333,7 @@ const getTasksSummary = async (user) => {
 
 module.exports = {
     create,
+    addDocuments,
     findAll,
     findById,
     update,
