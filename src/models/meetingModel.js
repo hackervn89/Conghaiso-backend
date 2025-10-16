@@ -1,7 +1,10 @@
 const db = require('../config/database');
 const storageService = require('../services/storageService');
+const { CustomError } = require('./errors');
 
 const findById = async (id, user) => {
+  // Tối ưu hóa: Logic kiểm tra quyền được đưa trực tiếp vào truy vấn SQL.
+  // CSDL sẽ chỉ trả về kết quả nếu người dùng có quyền, tránh lãng phí tài nguyên.
   const query = `
     SELECT
       m.*,
@@ -44,37 +47,26 @@ const findById = async (id, user) => {
         ) ag
       ) AS agenda
     FROM meetings m
-    WHERE m.meeting_id = $1;
+    WHERE m.meeting_id = $1
+      AND (
+        -- 1. Admin có thể xem mọi thứ
+        $3 = 'Admin'
+        -- 2. Người dùng là người tham dự (hoặc được mời)
+        OR EXISTS (
+          SELECT 1 FROM meeting_attendees ma WHERE ma.meeting_id = m.meeting_id AND ma.user_id = $2
+        )
+        -- 3. Người dùng là thư ký và cuộc họp thuộc phạm vi của họ
+        OR ($3 = 'Secretary' AND EXISTS (
+          SELECT 1 FROM secretary_scopes ss WHERE ss.user_id = $2 AND ss.org_id = m.org_id
+        ))
+      );
   `;
 
-  const { rows } = await db.query(query, [id]);
+  const { rows } = await db.query(query, [id, user.user_id, user.role]);
   const meeting = rows[0];
 
-  if (!meeting) {
-    return null;
-  }
-
-  meeting.attendees = meeting.attendees || [];
-  meeting.agenda = meeting.agenda || [];
-
-  if (user.role === 'Admin') {
-    return meeting;
-  }
-
-  const isAttendee = meeting.attendees.some(attendee => attendee && attendee.user_id === user.user_id);
-  if (isAttendee) {
-    return meeting;
-  }
-
-  if (user.role === 'Secretary') {
-    const scopeQuery = 'SELECT 1 FROM secretary_scopes WHERE user_id = $1 AND org_id = $2';
-    const scopeResult = await db.query(scopeQuery, [user.user_id, meeting.org_id]);
-    if (scopeResult.rows.length > 0) {
-      return meeting;
-    }
-  }
-
-  return null;
+  // Nếu không có dòng nào trả về, nghĩa là không tìm thấy hoặc không có quyền
+  return meeting || null;
 };
 
 const create = async (meetingData, creatorId) => {
@@ -233,34 +225,69 @@ const remove = async (id) => {
 
 // --- Other functions remain unchanged ---
 
-const findForUser = async (user) => {
+const findForUser = async (user, filters = {}) => {
   const userId = user.user_id;
-  if (user.role === 'Admin') {
-    const query = 'SELECT * FROM meetings ORDER BY start_time DESC';
-    const { rows } = await db.query(query);
-    return rows;
-  }
-  if (user.role === 'Secretary') {
-    const query = `
-      SELECT * FROM meetings
-      WHERE org_id IN (SELECT org_id FROM secretary_scopes WHERE user_id = $1)
-      UNION
-      SELECT m.* FROM meetings m
-      JOIN meeting_attendees ma ON m.meeting_id = ma.meeting_id
-      WHERE ma.user_id = $1
-      ORDER BY start_time DESC;
-    `;
-    const { rows } = await db.query(query, [userId]);
-    return rows;
-  }
-  const query = `
-    SELECT m.*
+  const { status, timeRange } = filters;
+
+  let baseQuery = `
+    SELECT 
+      m.*,
+      CASE
+        WHEN m.start_time > CURRENT_TIMESTAMP THEN 'upcoming'
+        WHEN m.end_time < CURRENT_TIMESTAMP THEN 'finished'
+        ELSE 'ongoing'
+      END AS dynamic_status
     FROM meetings m
-    JOIN meeting_attendees ma ON m.meeting_id = ma.meeting_id
-    WHERE ma.user_id = $1
-    ORDER BY start_time DESC;
   `;
-  const { rows } = await db.query(query, [userId]);
+  const joins = new Set();
+  const whereClauses = [];
+  const params = [];
+  let paramIndex = 1;
+
+  if (user.role === 'Admin') {
+    // Admin sees all, no initial WHERE clause based on user
+  } else if (user.role === 'Secretary') {
+    whereClauses.push(`(
+      m.org_id IN (SELECT org_id FROM secretary_scopes WHERE user_id = $${paramIndex})
+      OR m.meeting_id IN (SELECT meeting_id FROM meeting_attendees WHERE user_id = $${paramIndex})
+    )`);
+    params.push(userId);
+    paramIndex++;
+  } else {
+    joins.add('JOIN meeting_attendees ma ON m.meeting_id = ma.meeting_id');
+    whereClauses.push(`ma.user_id = $${paramIndex}`);
+    params.push(userId);
+    paramIndex++;
+  }
+
+  // Apply status filter
+  if (status) {
+    const now = 'CURRENT_TIMESTAMP';
+    if (status === 'upcoming') {
+      whereClauses.push(`m.start_time > ${now}`);
+    } else if (status === 'ongoing') {
+      whereClauses.push(`m.start_time <= ${now} AND m.end_time >= ${now}`);
+    } else if (status === 'finished') {
+      whereClauses.push(`m.end_time < ${now}`);
+    }
+  }
+
+  // Apply time range filter
+  if (timeRange === 'today') {
+    whereClauses.push(`m.start_time::date = CURRENT_DATE`);
+  } else if (timeRange === 'this_week') {
+    whereClauses.push(`date_trunc('week', m.start_time) = date_trunc('week', CURRENT_DATE)`);
+  } else if (timeRange === 'this_month') {
+    whereClauses.push(`date_trunc('month', m.start_time) = date_trunc('month', CURRENT_DATE)`);
+  }
+
+  let finalQuery = `${baseQuery} ${[...joins].join(' ')}`;
+  if (whereClauses.length > 0) {
+    finalQuery += ` WHERE ${whereClauses.join(' AND ')}`;
+  }
+  finalQuery += ' ORDER BY m.start_time DESC';
+
+  const { rows } = await db.query(finalQuery, params);
   return rows;
 };
 
@@ -356,7 +383,7 @@ const checkInWithQr = async (meetingId, token, userId) => {
             [meetingId, token]
         );
         if (meetingResult.rows.length === 0) {
-            throw new Error('Mã QR không hợp lệ hoặc đã hết hạn.');
+            throw new CustomError('Mã QR không hợp lệ hoặc đã hết hạn.', 400);
         }
         const meeting = meetingResult.rows[0];
 
@@ -365,10 +392,10 @@ const checkInWithQr = async (meetingId, token, userId) => {
             [meetingId, userId]
         );
         if (attendeeResult.rows.length === 0) {
-            throw new Error('Bạn không có trong danh sách tham dự cuộc họp này.');
+            throw new CustomError('Bạn không có trong danh sách tham dự cuộc họp này.', 403);
         }
         if (attendeeResult.rows[0].status === 'present') {
-             throw new Error('Bạn đã điểm danh rồi.');
+             throw new CustomError('Bạn đã điểm danh rồi.', 409);
         }
 
         await client.query(
@@ -425,7 +452,7 @@ const createDelegation = async (meetingId, delegatorUserId, delegateToUserId) =>
         const delegatorResult = await client.query(updateDelegatorQuery, [delegateToUserId, meetingId, delegatorUserId]);
         if (delegatorResult.rows.length === 0) {
             // Người ủy quyền không có trong danh sách mời ban đầu, không thể ủy quyền
-            throw new Error('Người ủy quyền không phải là người tham dự cuộc họp.');
+            throw new CustomError('Bạn không phải là người tham dự cuộc họp này để có thể ủy quyền.', 403);
         }
 
         // 2. Thêm người được ủy quyền vào danh sách tham dự (nếu họ chưa có)

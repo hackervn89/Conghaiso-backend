@@ -2,6 +2,7 @@ const taskModel = require('../models/taskModel');
 const userModel = require('../models/userModel');
 const notificationService = require('../services/notificationService');
 const db = require('../config/database'); // Import db để truy vấn
+const { CustomError } = require('../models/errors');
 const storageService = require('../services/storageService'); // Import storageService
 
 // Helper function to check permissions for modification/deletion
@@ -78,7 +79,12 @@ const createTask = async (req, res) => {
         const finalTask = await taskModel.findById(initialTask.task_id);
         res.status(201).json(finalTask);
     } catch (error) {
-        console.error("Lỗi khi tạo công việc:", error);
+        if (error instanceof CustomError) {
+            console.warn(`[Task Create] Lỗi nghiệp vụ: ${error.message}`);
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        // Lỗi hệ thống
+        console.error("Lỗi hệ thống khi tạo công việc:", error);
         res.status(500).json({ message: "Lỗi server khi tạo công việc." });
     }
 };
@@ -88,7 +94,11 @@ const getTasks = async (req, res) => {
         const tasks = await taskModel.findAll(req.user, req.query);
         res.status(200).json(tasks);
     } catch (error) {
-        console.error("Lỗi khi lấy danh sách công việc:", error);
+        if (error instanceof CustomError) {
+            console.warn(`[Task List] Lỗi nghiệp vụ: ${error.message}`);
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error("Lỗi hệ thống khi lấy danh sách công việc:", error);
         res.status(500).json({ message: "Lỗi server khi lấy danh sách công việc." });
     }
 };
@@ -97,11 +107,14 @@ const getTaskById = async (req, res) => {
     try {
         const task = await taskModel.findById(req.params.id);
         if (!task) {
-            return res.status(404).json({ message: "Không tìm thấy công việc." });
+            throw new CustomError("Không tìm thấy công việc.", 404);
         }
         res.status(200).json(task);
     } catch (error) {
-        console.error(`Lỗi khi lấy công việc ${req.params.id}:`, error);
+        if (error instanceof CustomError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error(`Lỗi hệ thống khi lấy công việc ${req.params.id}:`, error);
         res.status(500).json({ message: "Lỗi server." });
     }
 };
@@ -109,10 +122,14 @@ const getTaskById = async (req, res) => {
 const updateTask = async (req, res) => {
     try {
         const taskId = req.params.id;
-
         const task = await taskModel.findById(taskId);
+
+        if (!task) {
+            throw new CustomError("Không tìm thấy công việc để cập nhật.", 404);
+        }
+
         if (!canManageTask(task, req.user)) {
-            return res.status(403).json({ message: "Không có quyền sửa công việc này." });
+            throw new CustomError("Không có quyền sửa công việc này.", 403);
         }
 
         // Tách logic xử lý file ra khỏi model và xử lý ngay tại controller
@@ -141,9 +158,11 @@ const updateTask = async (req, res) => {
         const updatedTask = await taskModel.update(taskId, finalPayload);
         res.status(200).json(updatedTask);
     } catch (error) {
-        console.error(`[Backend] Lỗi nghiêm trọng khi cập nhật công việc ${req.params.id}:`, error);
-        // Trả về thông báo lỗi cụ thể hơn nếu có
-        res.status(500).json({ message: error.message || "Có lỗi xảy ra, không thể lưu công việc." });
+        if (error instanceof CustomError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error(`[Task Update] Lỗi hệ thống khi cập nhật công việc ${req.params.id}:`, error);
+        res.status(500).json({ message: "Có lỗi xảy ra, không thể lưu công việc." });
     }
 };
 
@@ -154,19 +173,22 @@ const updateTaskStatus = async (req, res) => {
         const task = await taskModel.findById(taskId);
 
         if (!task) {
-             return res.status(404).json({ message: "Không tìm thấy công việc." });
+             throw new CustomError("Không tìm thấy công việc.", 404);
         }
         
         const hasPermission = await canUpdateTaskStatus(task, req.user);
         if (!hasPermission) {
-            return res.status(403).json({ message: "Bạn không có quyền cập nhật trạng thái công việc này." });
+            throw new CustomError("Bạn không có quyền cập nhật trạng thái công việc này.", 403);
         }
         
         const completed_at = status === 'completed' ? new Date() : null;
         const updatedTask = await taskModel.updateStatus(taskId, status, completed_at);
         res.status(200).json(updatedTask);
     } catch (error) {
-        console.error(`Lỗi khi cập nhật trạng thái công việc ${req.params.id}:`, error);
+        if (error instanceof CustomError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error(`Lỗi hệ thống khi cập nhật trạng thái công việc ${req.params.id}:`, error);
         res.status(500).json({ message: "Lỗi server." });
     }
 };
@@ -175,13 +197,19 @@ const deleteTask = async (req, res) => {
     try {
         const taskId = req.params.id;
         const task = await taskModel.findById(taskId);
+        if (!task) {
+            throw new CustomError("Không tìm thấy công việc để xóa.", 404);
+        }
         if (!canManageTask(task, req.user)) {
-            return res.status(403).json({ message: "Không có quyền xóa công việc này." });
+            throw new CustomError("Không có quyền xóa công việc này.", 403);
         }
         await taskModel.remove(taskId);
         res.status(200).json({ message: "Đã xóa công việc thành công." });
     } catch (error) {
-        console.error(`Lỗi khi xóa công việc ${req.params.id}:`, error);
+        if (error instanceof CustomError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error(`Lỗi hệ thống khi xóa công việc ${req.params.id}:`, error);
         res.status(500).json({ message: "Lỗi server." });
     }
 };

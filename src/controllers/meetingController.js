@@ -6,6 +6,7 @@ const path = require('path');
 const qrcode = require('qrcode');
 const redis = require('../services/redisService');
 
+const { CustomError } = require('../models/errors');
 /**
  * Checks if a user has management permissions for a specific meeting.
  * @param {object} user - The user object from req.user.
@@ -42,8 +43,19 @@ const createMeeting = async (req, res) => {
     return res.status(403).json({ message: 'Không có quyền tạo cuộc họp.' });
   }
   try {
-    const newMeeting = await meetingModel.create(req.body, user.user_id);
-    const { attendeeIds } = req.body;
+    const meetingData = { ...req.body };
+
+    // Tự động đặt thời gian kết thúc nếu không được cung cấp
+    if (meetingData.startTime && !meetingData.endTime) {
+      const startTime = new Date(meetingData.startTime);
+      // Thêm 4 giờ vào thời gian bắt đầu
+      startTime.setHours(startTime.getHours() + 4);
+      meetingData.endTime = startTime.toISOString();
+    }
+
+    const newMeeting = await meetingModel.create(meetingData, user.user_id);
+    const { attendeeIds } = meetingData;
+
     if (attendeeIds && attendeeIds.length > 0) {
         const pushTokens = await userModel.findPushTokensByUserIds(attendeeIds);
         if (pushTokens.length > 0) {
@@ -64,7 +76,7 @@ const createMeeting = async (req, res) => {
 
 const getMeetings = async (req, res) => {
   try {
-    const meetings = await meetingModel.findForUser(req.user);
+    const meetings = await meetingModel.findForUser(req.user, req.query);
     res.status(200).json(meetings);
   } catch (error) {
     console.error('Lỗi khi lấy danh sách cuộc họp:', error);
@@ -122,7 +134,18 @@ const updateMeeting = async (req, res) => {
     if (!hasPermission) {
       return res.status(403).json({ message: 'Không có quyền sửa cuộc họp này.' });
     }
-    const updatedMeeting = await meetingModel.update(meetingId, req.body, user);
+
+    const meetingData = { ...req.body };
+    // Lấy startTime từ dữ liệu gửi lên hoặc từ dữ liệu cũ trong DB
+    const finalStartTime = meetingData.startTime || meeting.start_time;
+
+    // Tự động đặt thời gian kết thúc nếu không được cung cấp
+    if (finalStartTime && !meetingData.endTime) {
+        const startTime = new Date(finalStartTime);
+        startTime.setHours(startTime.getHours() + 4);
+        meetingData.endTime = startTime.toISOString();
+    }
+    const updatedMeeting = await meetingModel.update(meetingId, meetingData, user);
 
     // Invalidate cache in Redis
     await redis.del(cacheKey);
@@ -313,14 +336,17 @@ const checkInWithQr = async (req, res) => {
     const { token: qrToken } = req.body;
     const user = req.user;
     try {
-        // Đã sửa: Hoán đổi thứ tự user.user_id và qrToken
         const result = await meetingModel.checkInWithQr(meetingId, qrToken, user.user_id);
-        if (!result) {
-            return res.status(400).json({ message: 'Điểm danh thất bại. Mã QR không hợp lệ hoặc bạn không có trong danh sách tham dự.' });
-        }
         res.status(200).json({ message: 'Điểm danh thành công!', attendee: result });
     } catch (error) {
-        console.error('Lỗi khi điểm danh bằng QR:', error);
+        // Phân biệt lỗi nghiệp vụ (CustomError) và lỗi hệ thống
+        if (error instanceof CustomError) {
+            // Đây là lỗi nghiệp vụ đã được dự đoán (ví dụ: QR sai, đã điểm danh)
+            console.warn(`[QR Check-in] Lỗi nghiệp vụ cho meeting ${meetingId}: ${error.message}`);
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        // Đây là lỗi hệ thống không mong muốn (ví dụ: mất kết nối DB)
+        console.error(`[QR Check-in] Lỗi hệ thống khi điểm danh cho meeting ${meetingId}:`, error);
         res.status(500).json({ message: 'Lỗi server khi điểm danh.' });
     }
 };
@@ -363,7 +389,13 @@ const delegateAttendance = async (req, res) => {
 
         res.status(200).json({ message: 'Ủy quyền thành công!', data: result });
     } catch (error) {
-        console.error('Error delegating attendance:', error);
+        if (error instanceof CustomError) {
+            // Lỗi nghiệp vụ đã được dự đoán
+            console.warn(`[Delegation] Lỗi nghiệp vụ cho meeting ${meetingId}: ${error.message}`);
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        // Lỗi hệ thống không mong muốn
+        console.error(`[Delegation] Lỗi hệ thống khi ủy quyền cho meeting ${meetingId}:`, error);
         res.status(500).json({ message: 'Lỗi máy chủ khi thực hiện ủy quyền.' });
     }
 };
