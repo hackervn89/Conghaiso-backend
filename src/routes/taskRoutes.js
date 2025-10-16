@@ -1,8 +1,9 @@
 const express = require('express');
 const {
+    createTask,
     getTasks,
     getTaskById,
-    createTask,
+    updateTask,
     updateTaskStatus,
     deleteTask,
 } = require('../controllers/taskController');
@@ -19,6 +20,7 @@ router.route('/')
 
 router.route('/:id')
     .get(getTaskById)
+    .put(updateTask) // Thêm dòng này để xử lý việc cập nhật công việc
     .delete(deleteTask);
 
 router.put('/:id/status', updateTaskStatus);
