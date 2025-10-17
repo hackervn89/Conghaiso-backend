@@ -24,8 +24,8 @@ const PORT = process.env.PORT || 3000;
 const allowedOrigins = [
   'http://localhost:5173',    // Giữ lại cho môi trường development
   'http://103.1.236.206',     // Cho phép truy cập qua IP
-  'http://conghaiso.vn',      // Tên miền chính của bạn
-  'http://www.conghaiso.vn'   // Tên miền có www
+  'https://conghaiso.vn',      // Tên miền chính của bạn
+  'https://www.conghaiso.vn'   // Tên miền có www
 ];
 
 const corsOptions = {
