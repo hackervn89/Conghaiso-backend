@@ -20,6 +20,28 @@ const draftRoutes = require('./src/routes/draftRoutes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Cấu hình CORS chi tiết để chấp nhận các tên miền cụ thể
+const allowedOrigins = [
+  'http://localhost:5173',    // Giữ lại cho môi trường development
+  'http://103.1.236.206',     // Cho phép truy cập qua IP
+  'http://conghaiso.vn',      // Tên miền chính của bạn
+  'http://www.conghaiso.vn'   // Tên miền có www
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Luôn cho phép các request không có origin (ví dụ: mobile apps, Postman)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
 app.use(cors());
 app.use(express.json());
 
@@ -37,7 +59,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/drafts', draftRoutes);
 
 app.get('/api', (req, res) => {
-  res.json({ message: 'Chào mừng đến với API Phòng Họp Số!' });
+  res.json({ message: 'Chào mừng đến với API Công Hải Số!' });
 });
 
 // Import and check database connection
@@ -55,5 +77,5 @@ app.listen(PORT, () => {
   console.log(`Server đang chạy tại http://localhost:${PORT}`);
   
   // Kích hoạt các tác vụ nền khi server khởi động
-  cronService.initializeCronJobs(); // <-- Dòng mới
+  cronService.initializeCronJobs(); 
 });
