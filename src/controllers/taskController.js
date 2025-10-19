@@ -91,8 +91,14 @@ const createTask = async (req, res) => {
 
 const getTasks = async (req, res) => {
     try {        
-        const tasks = await taskModel.findAll(req.user, req.query);
-        res.status(200).json(tasks);
+        // Đọc tham số phân trang từ query, với giá trị mặc định
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 15;
+
+        // Truyền các tham số filter và phân trang xuống model
+        const result = await taskModel.findAll(req.user, { ...req.query, page, limit });
+
+        res.status(200).json(result);
     } catch (error) {
         if (error instanceof CustomError) {
             console.warn(`[Task List] Lỗi nghiệp vụ: ${error.message}`);
