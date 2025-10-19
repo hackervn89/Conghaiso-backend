@@ -100,21 +100,57 @@ const buildTaskQuery = (user, filters) => {
 };
 
 const findAll = async (user, filters) => {
-    const { page, limit } = filters;
+    const { page, limit, sortBy, sortDirection } = filters;
     const offset = (page - 1) * limit;
 
     const { whereString, joinString, params, paramIndex } = buildTaskQuery(user, filters);
+
+    // --- [NEW] Xây dựng mệnh đề ORDER BY động và an toàn ---
+    const buildOrderByClause = () => {
+        const allowedSortBy = {
+            'created_at': 't.created_at',
+            'due_date': 't.due_date',
+            'priority': `CASE t.priority WHEN 'urgent' THEN 3 WHEN 'important' THEN 2 ELSE 1 END`
+        };
+
+        const sortByFields = sortBy ? String(sortBy).split(',') : ['created_at'];
+        const sortDirections = sortDirection ? String(sortDirection).split(',') : ['desc'];
+
+        const orderByParts = sortByFields.map((field, index) => {
+            const cleanField = field.trim();
+            const sortColumn = allowedSortBy[cleanField];
+            if (!sortColumn) return null; // Bỏ qua nếu cột không hợp lệ
+
+            const direction = (sortDirections[index]?.trim().toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+            return `${sortColumn} ${direction} NULLS LAST`;
+        }).filter(Boolean); // Lọc ra các giá trị null
+
+        if (orderByParts.length === 0) {
+            // Mặc định nếu không có tiêu chí hợp lệ nào
+            return { clause: 'ORDER BY t.created_at DESC NULLS LAST', extraSelect: ', t.created_at' };
+        }
+
+        // [FIX] Đảm bảo tất cả các cột/biểu thức trong ORDER BY đều có trong SELECT DISTINCT
+        const extraSelectParts = new Set();
+        sortByFields.forEach(field => {
+            const sortColumn = allowedSortBy[field.trim()];
+            if (sortColumn) extraSelectParts.add(sortColumn);
+        });
+
+        return { clause: `ORDER BY ${orderByParts.join(', ')}`, extraSelect: [...extraSelectParts].map(p => `, ${p}`).join('') };
+    };
+
+    const { clause: orderByClause, extraSelect: extraSelectColumn } = buildOrderByClause();
 
     // --- 1. Thực thi 2 truy vấn song song: Đếm tổng số và Lấy ID của trang hiện tại ---
     const countQuery = `SELECT COUNT(DISTINCT t.task_id) FROM tasks t ${joinString} ${whereString}`;
     
     const dataQuery = `
-        -- [FIX] Thêm t.created_at vào SELECT list để tương thích với ORDER BY
-        SELECT DISTINCT t.task_id, t.created_at
+        SELECT DISTINCT t.task_id ${extraSelectColumn}
         FROM tasks t
         ${joinString}
         ${whereString}
-        ORDER BY t.created_at DESC
+        ${orderByClause}
         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
 

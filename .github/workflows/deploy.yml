@@ -19,7 +19,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
           script: |
             echo "🚀 Bắt đầu triển khai Backend..."
-            cd /home/hoangvietadmin/conghaiso/conghaiso-backend
+            cd /home/hoangvietadmin/conghaiso/Conghaiso-backend
             
             echo "🔄 Kéo code mới nhất từ nhánh main..."
             git fetch --all
