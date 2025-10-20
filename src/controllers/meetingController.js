@@ -301,6 +301,10 @@ const updateAttendance = async (req, res) => {
             }
         }
 
+        // [REAL-TIME] Phát sự kiện cập nhật điểm danh qua Socket.IO
+        const roomName = `meeting-room-${meetingId}`;
+        req.io.to(roomName).emit('attendance_updated', { user_id: userId, status });
+
         res.status(200).json(updatedAttendee);
     } catch (error) {
         console.error("Lỗi khi cập nhật điểm danh:", error);
@@ -335,9 +339,41 @@ const checkInWithQr = async (req, res) => {
     const { meetingId } = req.params;
     const { token: qrToken } = req.body;
     const user = req.user;
+    const cacheKey = `meeting-details:${meetingId}`;
+
     try {
-        const result = await meetingModel.checkInWithQr(meetingId, qrToken, user.user_id);
-        res.status(200).json({ message: 'Điểm danh thành công!', attendee: result });
+        // 1. Cập nhật vào CSDL. Hàm này sẽ trả về thông tin của người tham dự đã được điểm danh.
+        const attendeeCheckedIn = await meetingModel.checkInWithQr(meetingId, qrToken, user.user_id);
+
+        // 2. [SỬA LỖI] Cập nhật cache thay vì xóa để tránh race condition
+        const cachedData = await redis.get(cacheKey);
+        if (cachedData) {
+            try {
+                const meetingData = JSON.parse(cachedData);
+                const attendeeIndex = meetingData.attendees.findIndex(a => a && a.user_id === user.user_id);
+
+                if (attendeeIndex !== -1) {
+                    meetingData.attendees[attendeeIndex].status = 'present';
+                    const ttl = await redis.ttl(cacheKey);
+                    if (ttl > 0) {
+                        await redis.set(cacheKey, JSON.stringify(meetingData), 'EX', ttl);
+                        console.log(`Cache UPDATED in Redis for meeting after QR check-in: ${meetingId}`);
+                    }
+                }
+            } catch (cacheError) {
+                console.error('Lỗi khi cập nhật Redis cache, sẽ tiến hành xóa cache:', cacheError);
+                await redis.del(cacheKey);
+            }
+        }
+
+        // 3. Phát sự kiện real-time cho các client khác
+        const roomName = `meeting-room-${meetingId}`;
+        const updatePayload = { user_id: user.user_id, status: 'present' };
+        req.io.to(roomName).emit('attendance_updated', updatePayload);
+        console.log(`[Socket.IO] Đã phát sự kiện 'attendance_updated' từ QR check-in tới phòng ${roomName}`, updatePayload);
+
+        // 4. Gửi phản hồi thành công về cho client đã thực hiện điểm danh
+        res.status(200).json({ message: 'Điểm danh thành công!', attendee: attendeeCheckedIn });
     } catch (error) {
         // Phân biệt lỗi nghiệp vụ (CustomError) và lỗi hệ thống
         if (error instanceof CustomError) {
@@ -346,7 +382,7 @@ const checkInWithQr = async (req, res) => {
             return res.status(error.statusCode).json({ message: error.message });
         }
         // Đây là lỗi hệ thống không mong muốn (ví dụ: mất kết nối DB)
-        console.error(`[QR Check-in] Lỗi hệ thống khi điểm danh cho meeting ${meetingId}:`, error);
+        console.error(`[QR Check-in] Lỗi hệ thống khi điểm danh cho meeting ${meetingId}:`, error); // Giữ lại log lỗi này
         res.status(500).json({ message: 'Lỗi server khi điểm danh.' });
     }
 };

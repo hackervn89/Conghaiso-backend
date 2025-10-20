@@ -1,6 +1,9 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
+const http = require('http');
+const { Server } = require("socket.io");
+
 const express = require('express');
 const cors = require('cors');
 const cronService = require('./src/services/cronService'); 
@@ -18,6 +21,8 @@ const draftRoutes = require('./src/routes/draftRoutes');
 
 
 const app = express();
+const httpServer = http.createServer(app);
+
 const PORT = process.env.PORT || 3000;
 
 // Cấu hình CORS chi tiết để chấp nhận các tên miền cụ thể
@@ -42,8 +47,22 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-app.use(cors());
 app.use(express.json());
+
+// Cấu hình Socket.IO với CORS
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// Middleware để inject io instance vào request
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
 
 // ... (sử dụng các routes)
 app.use('/api/auth', authRoutes);
@@ -73,7 +92,28 @@ db.getClient()
     console.error('Không thể kết nối đến cơ sở dữ liệu:', err);
   });
 
-app.listen(PORT, () => {
+// Logic xử lý Socket.IO
+io.on('connection', (socket) => {
+  console.log(`[Socket.IO] Một client đã kết nối: ${socket.id}`);
+
+  socket.on('join_meeting_room', (meetingId) => {
+    const roomName = `meeting-room-${meetingId}`;
+    socket.join(roomName);
+    console.log(`[Socket.IO] Client ${socket.id} đã tham gia phòng: ${roomName}`);
+  });
+
+  socket.on('leave_meeting_room', (meetingId) => {
+    const roomName = `meeting-room-${meetingId}`;
+    socket.leave(roomName);
+    console.log(`[Socket.IO] Client ${socket.id} đã rời phòng: ${roomName}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[Socket.IO] Client đã ngắt kết nối: ${socket.id}`);
+  });
+});
+
+httpServer.listen(PORT, () => {
   console.log(`Server đang chạy tại http://localhost:${PORT}`);
   
   // Kích hoạt các tác vụ nền khi server khởi động
