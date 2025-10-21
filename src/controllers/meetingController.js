@@ -275,31 +275,10 @@ const updateAttendance = async (req, res) => {
         // 1. Cập nhật vào database (nguồn dữ liệu chính)
         const updatedAttendee = await meetingModel.updateSingleAttendance(meetingId, userId, status);
 
-        // 2. Cập nhật cache thay vì xóa
-        const cachedData = await redis.get(cacheKey);
-        if (cachedData) {
-            try {
-                const meetingData = JSON.parse(cachedData);
-                const attendeeIndex = meetingData.attendees.findIndex(a => a && a.user_id === userId);
-
-                if (attendeeIndex !== -1) {
-                    // Cập nhật trạng thái của đúng người tham dự
-                    meetingData.attendees[attendeeIndex].status = status;
-                    
-                    // Lấy thời gian sống còn lại của cache để bảo toàn
-                    const ttl = await redis.ttl(cacheKey);
-                    
-                    // Ghi đè lại dữ liệu mới vào cache
-                    if (ttl > 0) {
-                        await redis.set(cacheKey, JSON.stringify(meetingData), 'EX', ttl);
-                        console.log(`Cache UPDATED in Redis for meeting: ${meetingId}`);
-                    }
-                }
-            } catch (cacheError) {
-                console.error('Lỗi khi cập nhật Redis cache, sẽ tiến hành xóa cache để đảm bảo tính toàn vẹn:', cacheError);
-                await redis.del(cacheKey);
-            }
-        }
+        // 2. Vô hiệu hóa cache để đảm bảo dữ liệu mới nhất được lấy ở lần sau.
+        // Đây là chiến lược Cache Invalidation.
+        await redis.del(cacheKey);
+        console.log(`Cache INVALIDATED in Redis for meeting after manual attendance update: ${meetingId}`);
 
         // [REAL-TIME] Phát sự kiện cập nhật điểm danh qua Socket.IO
         const roomName = `meeting-room-${meetingId}`;
@@ -345,26 +324,9 @@ const checkInWithQr = async (req, res) => {
         // 1. Cập nhật vào CSDL. Hàm này sẽ trả về thông tin của người tham dự đã được điểm danh.
         const attendeeCheckedIn = await meetingModel.checkInWithQr(meetingId, qrToken, user.user_id);
 
-        // 2. [SỬA LỖI] Cập nhật cache thay vì xóa để tránh race condition
-        const cachedData = await redis.get(cacheKey);
-        if (cachedData) {
-            try {
-                const meetingData = JSON.parse(cachedData);
-                const attendeeIndex = meetingData.attendees.findIndex(a => a && a.user_id === user.user_id);
-
-                if (attendeeIndex !== -1) {
-                    meetingData.attendees[attendeeIndex].status = 'present';
-                    const ttl = await redis.ttl(cacheKey);
-                    if (ttl > 0) {
-                        await redis.set(cacheKey, JSON.stringify(meetingData), 'EX', ttl);
-                        console.log(`Cache UPDATED in Redis for meeting after QR check-in: ${meetingId}`);
-                    }
-                }
-            } catch (cacheError) {
-                console.error('Lỗi khi cập nhật Redis cache, sẽ tiến hành xóa cache:', cacheError);
-                await redis.del(cacheKey);
-            }
-        }
+        // 2. Vô hiệu hóa cache để đảm bảo dữ liệu mới nhất được lấy ở lần sau.
+        await redis.del(cacheKey);
+        console.log(`Cache INVALIDATED in Redis for meeting after QR check-in: ${meetingId}`);
 
         // 3. Phát sự kiện real-time cho các client khác
         const roomName = `meeting-room-${meetingId}`;
