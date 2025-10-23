@@ -294,9 +294,14 @@ const updateAttendance = async (req, res) => {
         const roomName = `meeting-room-${meetingId}`;
         req.io.to(roomName).emit('attendance_list_updated', updatedMeetingData.attendees);
 
+        // [CẢI TIẾN] Tính toán và phát sự kiện cập nhật thống kê
+        const newStats = await meetingModel.getAttendanceStats(meetingId);
+        req.io.to(roomName).emit('attendance_stats_updated', newStats);
+        console.log(`[Socket Emit] Đã phát sự kiện 'attendance_stats_updated' cho phòng: ${roomName}`);
+
         res.status(200).json({ message: "Cập nhật điểm danh thành công." });
     } catch (error) {
-        console.error("Lỗi khi cập nhật điểm danh:", error);
+        console.error(`[Attendance Update] Lỗi khi cập nhật điểm danh cho meeting ${meetingId}:`, error);
         res.status(500).json({ message: 'Lỗi khi cập nhật điểm danh.' });
     }
 };
@@ -329,47 +334,45 @@ const checkInWithQr = async (req, res) => {
     const { token: qrToken } = req.body;
     const user = req.user;
     const cacheKey = `meeting-details:${meetingId}`;
-    
-    // [LOG] Bắt đầu luồng xử lý
-    console.log(`[QR Check-in START] User ID: ${user.user_id} đang điểm danh cho Meeting ID: ${meetingId} với token: ${qrToken}`);
+
+    console.log(`[QR Check-in START] User ID: ${user.user_id} đang điểm danh cho Meeting ID: ${meetingId}`);
 
     try {
-        // 1. Cập nhật vào CSDL.
-        console.log(`[QR Check-in DB-UPDATE] Bắt đầu cập nhật CSDL...`);
+        // 1. Cập nhật vào CSDL và lấy thông tin cuộc họp.
         const attendeeCheckedIn = await meetingModel.checkInWithQr(meetingId, qrToken, user.user_id);
         console.log(`[QR Check-in DB-OK] CSDL đã cập nhật thành công cho User ID: ${user.user_id}.`);
 
         // 2. Vô hiệu hóa cache.
-        console.log(`[QR Check-in CACHE-INVALIDATE] Bắt đầu vô hiệu hóa cache cho key: ${cacheKey}`);
         await redis.del(cacheKey);
-        console.log(`[QR Check-in CACHE-OK] Cache đã được vô hiệu hóa thành công.`);
+        console.log(`[QR Check-in CACHE-OK] Cache đã được vô hiệu hóa cho key: ${cacheKey}`);
 
         // 3. [CẢI TIẾN] Lấy lại toàn bộ dữ liệu mới nhất của cuộc họp.
         // Dùng user của người điểm danh để đảm bảo quyền truy cập.
-        console.log(`[QR Check-in DB-FETCH] Bắt đầu lấy lại dữ liệu mới nhất của cuộc họp từ CSDL...`);
         const updatedMeetingData = await meetingModel.findById(meetingId, user);
-        console.log(`[QR Check-in DB-FETCH-OK] Đã lấy dữ liệu mới thành công. Số người tham dự: ${updatedMeetingData?.attendees?.length || 'không có'}`);
 
         // 4. [CẢI TIẾN] Cache lại dữ liệu mới này ngay lập tức.
         if (updatedMeetingData) {
             const ttl = process.env.CACHE_TTL_MEETING_DETAILS || 300;
-            console.log(`[QR Check-in CACHE-REFRESH] Bắt đầu làm mới cache cho key: ${cacheKey} với TTL: ${ttl}s`);
             await redis.set(cacheKey, JSON.stringify(updatedMeetingData), 'EX', ttl);
-            console.log(`[QR Check-in CACHE-REFRESH-OK] Cache đã được làm mới thành công.`);
+            console.log(`[QR Check-in CACHE-REFRESH] Cache đã được làm mới cho key: ${cacheKey}`);
         }
-        
+
         // 5. [CẢI TIẾN] Phát sự kiện real-time với toàn bộ danh sách người tham dự đã được cập nhật.
         const roomName = `meeting-room-${meetingId}`;
         const updatePayload = updatedMeetingData ? updatedMeetingData.attendees : [];
-        
-        // [LOG] Ghi lại hành động phát tín hiệu cho frontend
-        console.log(`[QR Check-in SOCKET-EMIT] Chuẩn bị phát sự kiện 'attendance_list_updated' tới phòng '${roomName}'...`);
-        req.io.to(roomName).emit('attendance_list_updated', updatePayload);
-        console.log(`[QR Check-in SOCKET-OK] Đã phát thành công sự kiện tới tất cả client trong phòng.`);
 
-        // 6. Gửi phản hồi thành công về cho client đã thực hiện điểm danh
+        console.log(`[QR Check-in SOCKET-EMIT] Chuẩn bị phát sự kiện 'attendance_list_updated' tới phòng: ${roomName}`);
+        req.io.to(roomName).emit('attendance_list_updated', updatePayload);
+        console.log(`[QR Check-in SOCKET-OK] Đã phát sự kiện thành công.`);
+
+        // [CẢI TIẾN] Tính toán và phát sự kiện cập nhật thống kê sau khi điểm danh QR
+        const newStats = await meetingModel.getAttendanceStats(meetingId);
+        req.io.to(roomName).emit('attendance_stats_updated', newStats);
+        console.log(`[QR Check-in SOCKET-EMIT] Đã phát sự kiện 'attendance_stats_updated' cho phòng: ${roomName}`);
+
+        // 4. Gửi phản hồi thành công về cho client đã thực hiện điểm danh
         console.log(`[QR Check-in DONE] Hoàn tất xử lý. Gửi phản hồi 200 OK.`);
-        res.status(200).json({ message: 'Điểm danh thành công!' });
+        res.status(200).json({ message: 'Điểm danh thành công!', attendee: attendeeCheckedIn });
 
     } catch (error) {
         // Phân biệt lỗi nghiệp vụ (CustomError) và lỗi hệ thống
