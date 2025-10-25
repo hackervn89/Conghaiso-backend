@@ -6,7 +6,7 @@ const { STORAGE_BASE_PATH } = require("../services/storageService");
 // Khởi tạo Gemini AI với khóa API
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Change model name here
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 const MAX_TOKENS_PER_CHUNK = 100000; // Adjust based on testing and Gemini limits
 
