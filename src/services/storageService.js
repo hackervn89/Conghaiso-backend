@@ -118,6 +118,28 @@ const moveFileToTaskFolder = async (tempRelativePath, taskId) => {
 };
 
 /**
+ * Di chuyển một tệp từ vị trí tạm thời đến thư mục tri thức (knowledge) cuối cùng của nó.
+ * @param {string} tempRelativePath - Đường dẫn tương đối của tệp trong thư mục tạm.
+ * @returns {Promise<{finalPath: string, originalName: string}>} - Đường dẫn tương đối cuối cùng và tên file gốc.
+ */
+const moveFileToKnowledgeFolder = async (tempRelativePath) => {
+    const now = new Date();
+    const year = now.getFullYear();
+
+    // Giữ nguyên tên file duy nhất đã được tạo trong thư mục temp.
+    const tempFilename = path.basename(tempRelativePath);
+
+    // Cấu trúc thư mục mới: knowledge/YYYY/tên_file
+    const dateFolder = `${year}`;
+    const finalRelativePath = path.join('knowledge', dateFolder, tempFilename).replace(/\\/g, '/');
+
+    await moveFileFromTemp(tempRelativePath, finalRelativePath);
+    return {
+        finalPath: finalRelativePath,
+        originalName: tempFilename.substring(tempFilename.indexOf('-', tempFilename.indexOf('-') + 1) + 1)
+    };
+};
+/**
  * Lưu một tệp đính kèm cho dự thảo vào thư mục cuối cùng của nó.
  * Cấu trúc thư mục: drafts/YYYY/MM/draftId/filename
  * @param {object} file - Đối tượng tệp từ multer (đã được decode tên).
@@ -208,6 +230,7 @@ module.exports = {
     saveFileToTempFolder,
     moveFileToMeetingFolder,
     moveFileToTaskFolder,
+    moveFileToKnowledgeFolder, // [AI-FEATURE] Export hàm mới
     // Hàm moveFileFromTemp là hàm nội bộ, không cần export
     saveDraftAttachment,
     deleteFile,

@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const pgvector = require('pgvector/pg');
 require('dotenv').config();
 
 let dbConfig;
@@ -32,7 +33,14 @@ const poolConfig = {
 const pool = new Pool(poolConfig);
 
 // Log pool creation for verification
-console.log(`Database pool created with max connections: ${poolConfig.max}`);
+console.log(`Đã tạo pool kết nối CSDL với tối đa ${poolConfig.max} kết nối.`);
+
+// [AI-FEATURE] Register the vector type for each client in the pool
+pool.on('connect', async (client) => {
+    await pgvector.registerType(client);
+});
+
+console.log('Đã thiết lập đăng ký kiểu dữ liệu pgvector cho các kết nối mới.');
 
 // Xuất pool ra để các file khác trong dự án có thể sử dụng
 module.exports = {

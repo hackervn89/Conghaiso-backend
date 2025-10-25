@@ -19,6 +19,8 @@ const reportRoutes = require('./src/routes/reportRoutes');
 const summarizeRoutes = require('./src/routes/summarizeRoutes');
 const fileRoutes = require('./src/routes/fileRoutes');
 const draftRoutes = require('./src/routes/draftRoutes');
+const knowledgeRoutes = require('./src/routes/knowledgeRoutes'); // [AI-FEATURE]
+const geminiRoutes = require('./src/routes/geminiRoutes'); // [AI-FEATURE]
 
 const { createAdapter } = require("@socket.io/redis-adapter");
 const Redis = require('ioredis'); // Import ioredis trực tiếp để tạo subClient
@@ -154,6 +156,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/summarize', summarizeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/drafts', draftRoutes);
+app.use('/api/knowledge', knowledgeRoutes); // [AI-FEATURE]
+app.use('/api', geminiRoutes); // [AI-FEATURE] for /api/chat
 
 app.get('/api', (req, res) => {
   res.json({ message: 'Chào mừng đến với API Công Hải Số!' });
