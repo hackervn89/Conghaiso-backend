@@ -3,6 +3,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const db = require('./src/config/database');
 const aiService = require('./src/services/aiService');
+const { TaskType } = require('@google/generative-ai');
 const knowledgeModel = require('./src/models/knowledgeModel');
 
 const SOURCE_FILE = path.join(__dirname, 'tài liệu kỹ thuật.txt');
@@ -102,7 +103,7 @@ async function main() {
             console.log(`Processing chunk ${i + 1}/${chunks.length}...`);
 
             // Tạo embedding
-            const embedding = await aiService.generateEmbedding(chunk);
+            const embedding = await aiService.generateEmbedding(chunk, TaskType.RETRIEVAL_DOCUMENT);
 
             // Insert vào CSDL
             await knowledgeModel.create({

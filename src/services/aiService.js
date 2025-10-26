@@ -20,12 +20,21 @@ const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" })
 /**
  * Tạo embedding cho văn bản.
  * @param {string} text - Văn bản cần tạo embedding.
+ * @param {TaskType} taskType - Loại tác vụ embedding.
  * @returns {Array<number>} - Vector embedding.
  */
-const generateEmbedding = async (text) => {
+const generateEmbedding = async (text, taskType) => {
     try {
-        const result = await embeddingModel.embedContent(text);
-        return result.embedding.values;
+        if (Array.isArray(text)) {
+            // Xử lý batch nếu đầu vào là một mảng các chuỗi
+            const result = await embeddingModel.batchEmbedContents({
+                requests: text.map(t => ({ content: t, taskType }))
+            });
+            return result.embeddings.map(e => e.values);
+        } else {
+            const result = await embeddingModel.embedContent({ content: text, taskType });
+            return result.embedding.values;
+        }
     } catch (error) {
         console.error('Lỗi khi tạo embedding (generateEmbedding):', error);
         throw new Error('Lỗi khi tạo embedding');
@@ -35,16 +44,21 @@ const generateEmbedding = async (text) => {
 // --- Hàm 2: Lấy câu trả lời Chat (ĐÃ NÂNG CẤP) ---
 /**
  * Lấy phản hồi chat từ Gemini.
- * @param {string} prompt - Câu hỏi của người dùng (đã qua xử lý RAG hoặc chưa).
- * @param {Array} history - Lịch sử chat (bao gồm cả system prompt).
+ * @param {object} options - Các tùy chọn cho việc chat.
+ * @param {string} options.systemInstruction - Chỉ dẫn hệ thống cho AI.
+ * @param {Array} options.history - Lịch sử chat thực tế.
+ * @param {string} options.prompt - Câu hỏi mới của người dùng.
  * @returns {string} - Câu trả lời của AI.
  */
-const generateChatResponse = async (prompt, history = []) => {
+const generateChatResponse = async ({ systemInstruction, history = [], prompt }) => {
     try {
         console.log("[AI Service] Using unified model with Google Search.");
 
         // Bắt đầu chat với history được cung cấp
-        const chat = chatModel.startChat({ history: history });
+        const chat = chatModel.startChat({ 
+            history: history,
+            systemInstruction: { role: "system", parts: [{ text: systemInstruction }] }
+        });
         const result = await chat.sendMessage(prompt);
         const response = await result.response;
         

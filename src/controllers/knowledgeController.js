@@ -5,64 +5,100 @@ const fs = require('fs/promises');
 const pdf = require('pdf-extraction');
 const mammoth = require('mammoth');
 const path = require('path');
+const { TaskType } = require('@google/generative-ai');
+
+const SIMILARITY_THRESHOLD = 0.8; // Ngưỡng tương đồng, có thể điều chỉnh
+
+/**
+ * Tính toán độ tương đồng cosine giữa hai vector.
+ * @param {number[]} vecA - Vector A.
+ * @param {number[]} vecB - Vector B.
+ * @returns {number} - Điểm tương đồng cosine.
+ */
+function cosineSimilarity(vecA, vecB) {
+    let dotProduct = 0.0;
+    let normA = 0.0;
+    let normB = 0.0;
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    if (normA === 0 || normB === 0) {
+        return 0;
+    }
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
 
 /**
  * Chia một văn bản lớn thành các đoạn nhỏ (chunks).
- * [REFACTOR] Sử dụng thuật toán chia văn bản theo cấp bậc (Recursive Text Splitting)
- * để bảo toàn ngữ cảnh tốt hơn.
+ * [REFACTOR] Sử dụng thuật toán chia văn bản theo ngữ nghĩa (Semantic Chunking).
  * @param {string} text - Nội dung văn bản.
  * @returns {string[]} - Mảng các chunks.
  */
-function chunkText(text) {
-    const chunkSize = 8000; // Kích thước chunk tối đa
-    const chunkOverlap = 200; // Độ dài gối lên nhau giữa các chunk
-    const separators = ["\n\n", "\n", ". ", " ", ""];
+async function chunkText(text) {
+    const MAX_CHUNK_WORDS = 1500; // Giới hạn an toàn về số từ cho mỗi chunk
 
-    function splitTextWithSeparators(text, separators) {
-        const finalChunks = [];
-        let currentText = text;
-        let separator = separators[0];
+    // 1. Tách văn bản thành các câu.
+    // Sử dụng regex để tách câu một cách thông minh hơn, giữ lại dấu câu.
+    const rawSentences = text.match(/[^.!?]+[.!?]+(\s*|$)/g) || [text];
 
-        for (let i = 0; i < separators.length; i++) {
-            separator = separators[i];
-            if (separator === "" && currentText.length > 0) {
-                // Nếu không còn dấu phân tách, chia theo ký tự
-                for (let j = 0; j < currentText.length; j += chunkSize) {
-                    finalChunks.push(currentText.substring(j, j + chunkSize));
-                }
-                currentText = "";
-                break;
-            }
+    // [FIX] Lọc ra các câu rỗng, chỉ chứa khoảng trắng, hoặc quá ngắn để tránh lỗi 400 từ Google API.
+    // Một câu có ý nghĩa thường có ít nhất 10 ký tự.
+    const MIN_SENTENCE_LENGTH = 10;
+    const sentences = rawSentences.map(s => {
+        // [FIX] Làm sạch chuỗi văn bản một cách triệt để.
+        // 1. Thay thế tất cả các ký tự xuống dòng bằng một khoảng trắng.
+        // 2. Loại bỏ các ký tự điều khiển không in được.
+        // 3. Loại bỏ các khoảng trắng thừa liên tiếp.
+        // 4. Loại bỏ khoảng trắng ở đầu/cuối.
+        return s.replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1F\x7F]/g, '').replace(/\s\s+/g, ' ').trim();
+    })
+    .filter(s => s.length >= MIN_SENTENCE_LENGTH);
 
-            const splits = currentText.split(separator);
-            const newChunks = [];
-            for (const split of splits) {
-                if (split.length > chunkSize) {
-                    // Nếu một phần vẫn quá lớn, đưa nó vào vòng lặp tiếp theo với dấu phân tách khác
-                    newChunks.push(split);
-                } else {
-                    finalChunks.push(split);
-                }
-            }
-            currentText = newChunks.join(separator);
-        }
-        if (currentText) finalChunks.push(currentText);
-        return finalChunks;
+    if (sentences.length === 0) {
+        return [];
+    }
+    if (sentences.length === 1) {
+        return [sentences[0]];
     }
 
-    const splits = splitTextWithSeparators(text, separators);
-    const mergedChunks = [];
-    let currentChunk = "";
-    for (const split of splits) {
-        if (currentChunk && (currentChunk.length + split.length > chunkSize)) {
-            mergedChunks.push(currentChunk);
-            currentChunk = currentChunk.slice(currentChunk.length - chunkOverlap);
-        }
-        currentChunk += (currentChunk ? "\n\n" : "") + split;
-    }
-    if (currentChunk) mergedChunks.push(currentChunk);
+    // 2. Tạo embedding cho tất cả các câu.
+    // Sử dụng batchEmbedContents để hiệu quả hơn.
+    const embeddings = await aiService.generateEmbedding(sentences, TaskType.SEMANTIC_SIMILARITY);
 
-    return mergedChunks.filter(c => c.trim().length > 200); // Lọc bỏ các chunk quá ngắn
+    // 3. Tính toán độ tương đồng giữa các câu liên tiếp.
+    const similarities = [];
+    for (let i = 0; i < embeddings.length - 1; i++) {
+        const sim = cosineSimilarity(embeddings[i], embeddings[i + 1]);
+        similarities.push(sim);
+    }
+
+    // 4. Xác định các điểm ngắt (split points) dựa trên ngưỡng.
+    const chunks = [];
+    let currentChunkSentences = [sentences[0]];
+
+    for (let i = 0; i < similarities.length; i++) {
+        const nextSentence = sentences[i + 1];
+        const currentChunkWordCount = currentChunkSentences.join(' ').split(/\s+/).length;
+
+        // Điều kiện ngắt:
+        // 1. Ngắt theo ngữ nghĩa (độ tương đồng thấp).
+        // 2. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài).
+        if (similarities[i] < SIMILARITY_THRESHOLD || (currentChunkWordCount + nextSentence.split(/\s+/).length) > MAX_CHUNK_WORDS) {
+            // Hoàn thành chunk hiện tại.
+            chunks.push(currentChunkSentences.join(' ').trim());
+            // Bắt đầu một chunk mới với câu tiếp theo.
+            currentChunkSentences = [sentences[i + 1]];
+        } else {
+            // Nếu các câu vẫn còn tương đồng, tiếp tục thêm vào chunk hiện tại.
+            currentChunkSentences.push(sentences[i + 1]);
+        }
+    }
+    // Thêm chunk cuối cùng vào danh sách.
+    chunks.push(currentChunkSentences.join(' ').trim());
+
+    return chunks.filter(c => c.length > 0);
 }
 
 const createKnowledge = async (req, res) => {
@@ -95,7 +131,7 @@ const createKnowledge = async (req, res) => {
         }
 
         // 3. Chia nhỏ (chunking) nội dung file
-        const chunks = chunkText(fileContent);
+        const chunks = await chunkText(fileContent);
         if (chunks.length === 0) {
             return res.status(400).json({ message: 'File content is too short or not formatted correctly to be chunked.' });
         }
@@ -107,7 +143,10 @@ const createKnowledge = async (req, res) => {
             // để tránh lỗi "invalid byte sequence for encoding UTF8"
             const sanitizedChunk = chunk.replace(/\x00/g, '');
 
-            const embedding = await aiService.generateEmbedding(sanitizedChunk);
+            // [FIX] Cung cấp TaskType.RETRIEVAL_DOCUMENT khi tạo embedding để lưu trữ.
+            // Đây là nguyên nhân gây ra lỗi 400 Bad Request.
+            const embedding = await aiService.generateEmbedding(sanitizedChunk, TaskType.RETRIEVAL_DOCUMENT);
+
             const newKnowledge = await knowledgeModel.create({
                 content: sanitizedChunk,
                 category: category || 'Uncategorized',
@@ -133,7 +172,7 @@ const updateKnowledge = async (req, res) => {
             return res.status(400).json({ message: 'Content is required.' });
         }
 
-        const embedding = await aiService.generateEmbedding(content);
+        const embedding = await aiService.generateEmbedding(content, TaskType.RETRIEVAL_DOCUMENT);
         const updatedKnowledge = await knowledgeModel.update(id, { content, category, source_document, embedding });
 
         if (!updatedKnowledge) {

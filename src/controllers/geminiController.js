@@ -19,48 +19,50 @@ const chatWithAI = async (req, res) => {
         );
         const { decision } = routerResponse.data;
 
-        let augmentedPrompt;
-        const systemPrompt = `Bạn là trợ lý ảo chuyên nghiệp của "Công Hải Số".`;
+        // --- [REFACTOR] Tái cấu trúc logic prompt ---
+        let systemInstruction = `Bạn là trợ lý ảo chuyên nghiệp của "Công Hải Số".`;
+        let userPrompt = prompt; // Giữ nguyên prompt gốc của người dùng
 
         // --- Bước 2: Xây dựng prompt dựa trên quyết định của router ---
         if (decision === 'ACTIVATE_RAG') {
             console.log('[AI Chat] Kích hoạt RAG dựa trên quyết định của router.');
             // 2.1. Tạo embedding cho câu hỏi
             const promptEmbedding = await aiService.generateEmbedding(prompt, TaskType.RETRIEVAL_QUERY);
-
+ 
             // 2.2. Tìm các chunks tương tự
             const similarChunks = await knowledgeModel.findSimilar(promptEmbedding, 5); // Lấy 5 chunks liên quan nhất
-
+ 
             // 2.3. Xây dựng context và prompt cuối cùng
             const context = similarChunks.map(chunk => chunk.content).join('\n\n---\n\n');
-            augmentedPrompt = `Hãy phân tích tài liệu và câu hỏi dưới đây.
---- BẮT ĐẦU TÀI LIỆU ---
+            
+            // [REFACTOR] Thay vì gói prompt của người dùng, chúng ta đưa context vào system instruction.
+            // Điều này giúp AI hiểu rõ vai trò của nó và nguồn dữ liệu tham khảo.
+            systemInstruction = `Bạn là trợ lý ảo chuyên nghiệp của "Công Hải Số".
+Hãy phân tích tài liệu tham khảo dưới đây để trả lời câu hỏi của người dùng.
+--- BẮT ĐẦU TÀI LIỆU THAM KHẢO ---
 ${context}
---- KẾT THÚC TÀI LIỆU ---
-Câu hỏi của người dùng: "${prompt}"
+--- KẾT THÚC TÀI LIỆU THAM KHẢO ---
 ---
-Chỉ dẫn:
-1. Nếu câu hỏi của người dùng có liên quan đến nội dung trong "TÀI LIỆU", hãy dựa vào tài liệu và kiến thức của bạn để trả lời câu hỏi một cách chính xác.
-2. Nếu câu hỏi và tài liệu không liên quan đến nhau, hãy bỏ qua tài liệu và trả lời câu hỏi dựa trên kiến thức chung của bạn, đồng thời sử dụng công cụ tìm kiếm Google Search để có thông tin mới nhất và phân tích để trả lời. Lưu ý, bạn không cần phân tích ra sự có liên quan hay không liên quan giữa câu hỏi và tài liệu, Bạn chỉ cần trả lời câu hỏi là được`;
-
+CHỈ DẪN QUAN TRỌNG:
+1. ƯU TIÊN SỐ 1: Nếu câu hỏi liên quan đến "TÀI LIỆU THAM KHẢO", hãy trả lời dựa trên tài liệu đó.
+2. ƯU TIÊN SỐ 2: Nếu tài liệu không đủ thông tin hoặc câu hỏi không liên quan, hãy sử dụng kiến thức chung và công cụ tìm kiếm Google Search để trả lời.
+3. Luôn trả lời trực tiếp vào câu hỏi, không cần đề cập đến việc bạn có dùng tài liệu hay không.`;
+ 
         } else { // decision === 'DIRECT_FALLBACK'
             console.log('[AI Chat] Sử dụng Fallback (kiến thức chung & Google Search) dựa trên quyết định của router.');
-            // 2.1. Xây dựng prompt đơn giản
-            augmentedPrompt = `Câu hỏi của người dùng: "${prompt}"
----
-Chỉ dẫn:
-Hãy trả lời câu hỏi của người dùng dựa trên kiến thức chung của bạn và sử dụng công cụ tìm kiếm Google Search để có thông tin mới nhất.`;
+            // [REFACTOR] System instruction đơn giản hơn, không cần gói prompt người dùng.
+            systemInstruction = `Bạn là trợ lý ảo chuyên nghiệp của "Công Hải Số". Hãy trả lời câu hỏi của người dùng dựa trên kiến thức chung và sử dụng công cụ tìm kiếm Google Search để có thông tin mới nhất.`;
         }
-
+ 
         // --- Bước 3: Generate - Xây dựng history và gọi Gemini ---
-        const finalHistory = [
-            { role: "user", parts: [{ text: systemPrompt }] },
-            { role: "model", parts: [{ text: "Vâng, tôi đã hiểu. Tôi là trợ lý ảo của Công Hải Số. Tôi đã sẵn sàng trả lời các câu hỏi." }] },
-            ...history // Thêm lịch sử chat cũ nếu có
-        ];
-
-        const reply = await aiService.generateChatResponse(augmentedPrompt, finalHistory);
-
+        // [REFACTOR] Gọi API theo cách chuẩn: tách biệt systemInstruction, history và prompt mới.
+        // Không còn tạo "lịch sử giả" nữa.
+        const reply = await aiService.generateChatResponse({
+            systemInstruction: systemInstruction,
+            history: history, // Lịch sử chat thực tế từ client
+            prompt: userPrompt // Câu hỏi thực tế của người dùng
+        });
+ 
         res.status(200).json({ reply });
 
     } catch (error) {
