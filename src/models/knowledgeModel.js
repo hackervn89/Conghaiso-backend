@@ -73,6 +73,23 @@ const findSimilar = async (embedding, limit = 10) => {
     return rows; // Trả về toàn bộ các dòng (bao gồm cả content và distance)
 };
 
+/**
+ * Tìm kiếm nhanh một bản ghi khớp nhất và trả về điểm tương đồng.
+ * Dùng cho bộ lọc ngữ nghĩa của AI Query Router.
+ * @param {Array<number>} embedding - Vector embedding của câu hỏi.
+ * @returns {Promise<{similarity_score: number}|null>} - Đối tượng chứa điểm tương đồng hoặc null.
+ */
+const getTopVectorMatch = async (embedding) => {
+    const query = `
+        SELECT 1 - (embedding <=> $1) AS similarity_score
+        FROM ai_knowledge
+        ORDER BY embedding <=> $1
+        LIMIT 1;
+    `;
+    const { rows } = await db.query(query, [pgvector.toSql(embedding)]);
+    return rows[0] || null;
+};
+
 module.exports = {
     create,
     update,
@@ -80,4 +97,5 @@ module.exports = {
     findAll,
     findById,
     findSimilar,
+    getTopVectorMatch,
 };

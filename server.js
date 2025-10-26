@@ -20,6 +20,8 @@ const summarizeRoutes = require('./src/routes/summarizeRoutes');
 const fileRoutes = require('./src/routes/fileRoutes');
 const draftRoutes = require('./src/routes/draftRoutes');
 const knowledgeRoutes = require('./src/routes/knowledgeRoutes'); // [AI-FEATURE]
+const geminiQueryRouter = require('./src/routes/geminiQueryRouter'); // [AI-FEATURE ROUTER]
+const anchorKeywordRoutes = require('./src/routes/anchorKeywordRoutes'); // [AI-FEATURE]
 const geminiRoutes = require('./src/routes/geminiRoutes'); // [AI-FEATURE]
 
 const { createAdapter } = require("@socket.io/redis-adapter");
@@ -157,6 +159,8 @@ app.use('/api/summarize', summarizeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/drafts', draftRoutes);
 app.use('/api/knowledge', knowledgeRoutes); // [AI-FEATURE]
+app.use('/api/router', geminiQueryRouter); // [AI-FEATURE ROUTER]
+app.use('/api/anchor-keywords', anchorKeywordRoutes); // [AI-FEATURE]
 app.use('/api', geminiRoutes); // [AI-FEATURE] for /api/chat
 
 app.get('/api', (req, res) => {
@@ -164,15 +168,22 @@ app.get('/api', (req, res) => {
 });
 
 // Import and check database connection
+const { loadKeywordsToCache } = require('./src/config/keywordCache');
 const db = require('./src/config/database');
-db.getClient()
-  .then(client => {
-    console.log('Đã kết nối thành công đến cơ sở dữ liệu.');
-    client.release();
-  })
-  .catch(err => {
-    console.error('Không thể kết nối đến cơ sở dữ liệu:', err);
-  });
+
+const initializeApp = async () => {
+    try {
+        const client = await db.getClient();
+        console.log('Đã kết nối thành công đến cơ sở dữ liệu.');
+        client.release();
+
+        // Nạp cache từ khóa neo sau khi kết nối CSDL thành công
+        await loadKeywordsToCache();
+    } catch (err) {
+        console.error('Không thể khởi tạo ứng dụng:', err);
+        process.exit(1); // Thoát nếu không kết nối được CSDL hoặc nạp cache
+    }
+};
 
 // Logic xử lý Socket.IO
 io.on('connection', (socket) => {
@@ -229,9 +240,11 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('[FATAL] Lỗi UNHANDLED REJECTION:', reason);
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Server đang chạy tại http://localhost:${PORT}`);
+initializeApp().then(() => {
+    httpServer.listen(PORT, () => {
+        console.log(`Server đang chạy tại http://localhost:${PORT}`);
 
-  // Kích hoạt các tác vụ nền khi server khởi động
-  cronService.initializeCronJobs();
+        // Kích hoạt các tác vụ nền khi server khởi động
+        cronService.initializeCronJobs();
+    });
 });
