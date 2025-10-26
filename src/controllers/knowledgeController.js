@@ -8,50 +8,62 @@ const path = require('path');
 
 /**
  * Chia một văn bản lớn thành các đoạn nhỏ (chunks).
+ * [REFACTOR] Sử dụng thuật toán chia văn bản theo cấp bậc (Recursive Text Splitting)
+ * để bảo toàn ngữ cảnh tốt hơn.
  * @param {string} text - Nội dung văn bản.
  * @returns {string[]} - Mảng các chunks.
  */
- function chunkText(text) {
-    // Giới hạn kích thước chunk (tính bằng ký tự). 8000 ký tự là một giới hạn an toàn
-    // cho hầu hết các model embedding (ví dụ: 2048 token * ~4 ký tự/token).
-    const MAX_CHUNK_SIZE = 8000;
-    const MIN_CHUNK_SIZE = 200; // Giữ lại các chunk có độ dài tối thiểu
+function chunkText(text) {
+    const chunkSize = 8000; // Kích thước chunk tối đa
+    const chunkOverlap = 200; // Độ dài gối lên nhau giữa các chunk
+    const separators = ["\n\n", "\n", ". ", " ", ""];
 
-    const finalChunks = [];
+    function splitTextWithSeparators(text, separators) {
+        const finalChunks = [];
+        let currentText = text;
+        let separator = separators[0];
 
-    // 1. Chia văn bản thành các đoạn lớn dựa trên dòng trống.
-    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim() !== '');
-
-    for (const paragraph of paragraphs) {
-        // 2. Nếu một đoạn văn đã đủ nhỏ, coi nó là một chunk.
-        if (paragraph.length <= MAX_CHUNK_SIZE) {
-            if (paragraph.length >= MIN_CHUNK_SIZE) {
-                finalChunks.push(paragraph);
+        for (let i = 0; i < separators.length; i++) {
+            separator = separators[i];
+            if (separator === "" && currentText.length > 0) {
+                // Nếu không còn dấu phân tách, chia theo ký tự
+                for (let j = 0; j < currentText.length; j += chunkSize) {
+                    finalChunks.push(currentText.substring(j, j + chunkSize));
+                }
+                currentText = "";
+                break;
             }
-            continue;
-        }
 
-        // 3. Nếu đoạn văn quá lớn, chia nó thành các câu.
-        // Regex này chia theo dấu chấm, chấm than, chấm hỏi theo sau là khoảng trắng hoặc xuống dòng.
-        const sentences = paragraph.match(/[^.!?]+[.!?]+(\s|\n|$)/g) || [paragraph];
-        let currentChunk = '';
-
-        for (const sentence of sentences) {
-            if (currentChunk.length + sentence.length > MAX_CHUNK_SIZE) {
-                finalChunks.push(currentChunk);
-                currentChunk = sentence;
-            } else {
-                currentChunk += sentence;
+            const splits = currentText.split(separator);
+            const newChunks = [];
+            for (const split of splits) {
+                if (split.length > chunkSize) {
+                    // Nếu một phần vẫn quá lớn, đưa nó vào vòng lặp tiếp theo với dấu phân tách khác
+                    newChunks.push(split);
+                } else {
+                    finalChunks.push(split);
+                }
             }
+            currentText = newChunks.join(separator);
         }
-        // Đừng quên thêm chunk cuối cùng
-        if (currentChunk.length >= MIN_CHUNK_SIZE) {
-            finalChunks.push(currentChunk);
-        }
+        if (currentText) finalChunks.push(currentText);
+        return finalChunks;
     }
 
-    return finalChunks;
- }
+    const splits = splitTextWithSeparators(text, separators);
+    const mergedChunks = [];
+    let currentChunk = "";
+    for (const split of splits) {
+        if (currentChunk && (currentChunk.length + split.length > chunkSize)) {
+            mergedChunks.push(currentChunk);
+            currentChunk = currentChunk.slice(currentChunk.length - chunkOverlap);
+        }
+        currentChunk += (currentChunk ? "\n\n" : "") + split;
+    }
+    if (currentChunk) mergedChunks.push(currentChunk);
+
+    return mergedChunks.filter(c => c.trim().length > 200); // Lọc bỏ các chunk quá ngắn
+}
 
 const createKnowledge = async (req, res) => {
     try {

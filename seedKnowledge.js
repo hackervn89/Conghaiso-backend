@@ -15,10 +15,63 @@ const SOURCE_DOCUMENT = 'tài liệu kỹ thuật.txt';
  * @param {string} text - Nội dung văn bản.
  * @returns {string[]} - Mảng các chunks.
  */
-function chunkText(text) {
-    // Chia văn bản thành các đoạn dựa trên hai hoặc nhiều ký tự xuống dòng
-    const chunks = text.split(/\n\s*\n/);
-    return chunks.filter(chunk => chunk.trim().length > 50); // Lọc bỏ các đoạn quá ngắn
+ function chunkText(text) {
+    const MAX_CHUNK_SIZE = 8000;
+    const separators = ["\n\n", "\n", " ", ""];
+
+    function recursiveSplit(textToSplit, currentSeparators) {
+        if (textToSplit.length <= MAX_CHUNK_SIZE) {
+            return [textToSplit];
+        }
+
+        const separator = currentSeparators[0];
+        const nextSeparators = currentSeparators.slice(1);
+
+        if (!separator) { // Không còn dấu phân tách nào
+            return [textToSplit];
+        }
+
+        const splits = textToSplit.split(separator);
+        const goodSplits = [];
+        let currentChunk = "";
+
+        for (const split of splits) {
+            if (currentChunk.length + split.length + separator.length > MAX_CHUNK_SIZE) {
+                goodSplits.push(currentChunk.trim());
+                currentChunk = split;
+            } else {
+                currentChunk += (currentChunk ? separator : "") + split;
+            }
+        }
+        if (currentChunk) {
+            goodSplits.push(currentChunk.trim());
+        }
+
+        const finalChunks = [];
+        for (const chunk of goodSplits) {
+            if (chunk.length > MAX_CHUNK_SIZE) {
+                finalChunks.push(...recursiveSplit(chunk, nextSeparators));
+            } else {
+                finalChunks.push(chunk);
+            }
+        }
+        return finalChunks;
+    }
+
+    const initialChunks = recursiveSplit(text, separators);
+    
+    const mergedChunks = [];
+    let tempChunk = "";
+    for (const chunk of initialChunks) {
+        if ((tempChunk + chunk).length > MAX_CHUNK_SIZE) {
+            mergedChunks.push(tempChunk);
+            tempChunk = "";
+        }
+        tempChunk += (tempChunk ? "\n\n" : "") + chunk;
+    }
+    if (tempChunk) mergedChunks.push(tempChunk);
+
+    return mergedChunks.filter(c => c.trim().length > 200); // Lọc bỏ các chunk quá ngắn
 }
 
 async function main() {
