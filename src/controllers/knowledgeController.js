@@ -98,7 +98,10 @@ async function chunkText(text) {
     // Thêm chunk cuối cùng vào danh sách.
     chunks.push(currentChunkSentences.join(' ').trim());
 
-    return chunks.filter(c => c.length > 0);
+    // LỌC BỎ các chunk rỗng hoặc chỉ chứa khoảng trắng
+    const validChunks = chunks.map(chunk => chunk.trim()).filter(chunk => chunk.length > 0);
+
+    return validChunks;
 }
 
 const createKnowledge = async (req, res) => {

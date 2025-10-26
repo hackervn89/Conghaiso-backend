@@ -23,16 +23,44 @@ const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" })
  * @param {TaskType} taskType - Loại tác vụ embedding.
  * @returns {Array<number>} - Vector embedding.
  */
-const generateEmbedding = async (text, taskType) => {
+const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
     try {
-        if (Array.isArray(text)) {
-            // Xử lý batch nếu đầu vào là một mảng các chuỗi
-            const result = await embeddingModel.batchEmbedContents({
-                requests: text.map(t => ({ content: t, taskType }))
-            });
-            return result.embeddings.map(e => e.values);
+        if (Array.isArray(textOrChunks)) {
+            // ĐÂY LÀ LOGIC MỚI: XỬ LÝ CHIA LÔ (BATCHING)
+            const BATCH_SIZE = 100; // Tuân thủ giới hạn 100 của Google
+            let allEmbeddings = [];
+
+            // [FIX] Cấu trúc request cho batchEmbedContents yêu cầu `content` phải là một đối tượng Content,
+            // không phải là một chuỗi.
+            const requests = textOrChunks.map(chunk => ({
+                content: { role: "user", parts: [{ text: chunk }] },
+                taskType: taskType
+            }));
+
+            console.log(`[AI Service]: Đang tạo embedding cho ${requests.length} chunk, chia thành các lô ${BATCH_SIZE}...`);
+
+            for (let i = 0; i < requests.length; i += BATCH_SIZE) {
+                const batchRequests = requests.slice(i, i + BATCH_SIZE);
+                
+                console.log(`[AI Service]: Đang gửi lô ${Math.floor(i / BATCH_SIZE) + 1}...`);
+                
+                const result = await embeddingModel.batchEmbedContents({ requests: batchRequests });
+                
+                // Chú ý: API của Google trả về 'embeddings', không phải 'data.embeddings'
+                const embeddings = result.embeddings.map(e => e.values);
+                allEmbeddings.push(...embeddings);
+            }
+
+            console.log(`[AI Service]: Đã tạo thành công ${allEmbeddings.length} embeddings.`);
+            return allEmbeddings;
+
         } else {
-            const result = await embeddingModel.embedContent({ content: text, taskType });
+            // Logic cho một text (giữ nguyên)
+            const result = await embeddingModel.embedContent({
+                content: { role: "user", parts: [{ text: textOrChunks }] },
+                taskType: taskType,
+                title: title
+            });
             return result.embedding.values;
         }
     } catch (error) {

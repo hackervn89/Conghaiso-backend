@@ -103,7 +103,7 @@ async function main() {
             console.log(`Processing chunk ${i + 1}/${chunks.length}...`);
 
             // Tạo embedding
-            const embedding = await aiService.generateEmbedding(chunk, TaskType.RETRIEVAL_DOCUMENT);
+            const embedding = await aiService.generateEmbedding(chunk, TaskType.RETRIEVAL_DOCUMENT, SOURCE_DOCUMENT);
 
             // Insert vào CSDL
             await knowledgeModel.create({
