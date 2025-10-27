@@ -153,22 +153,28 @@ const createKnowledge = async (req, res) => {
             return res.status(400).json({ message: 'File content is too short or not formatted correctly to be chunked.' });
         }
 
-        // 4. Lặp qua từng chunk, tạo embedding và lưu vào CSDL
+        // 4. [REFACTOR] Tạo embedding cho TẤT CẢ các chunk trong một lần gọi API duy nhất
+        // Điều này tận dụng logic batching trong aiService, tránh lỗi payload size và tăng hiệu suất.
+        console.log(`[Knowledge] Generating embeddings for ${chunks.length} chunks in a single batch call...`);
+        // [FIX] Loại bỏ ký tự NULL (\x00) khỏi tất cả các chunk trước khi tạo embedding
+        const sanitizedChunks = chunks.map(chunk => chunk.replace(/\x00/g, ''));
+        const embeddings = await aiService.generateEmbedding(sanitizedChunks, TaskType.RETRIEVAL_DOCUMENT);
+
+        if (embeddings.length !== sanitizedChunks.length) {
+            throw new Error('Mismatch between number of chunks and generated embeddings.');
+        }
+
+        // 5. Lặp qua các chunk và embedding đã tạo, sau đó lưu vào CSDL
         const ingestedChunks = [];
-        for (const chunk of chunks) {
-            // [FIX] Loại bỏ ký tự NULL (\x00) trước khi lưu vào CSDL
-            // để tránh lỗi "invalid byte sequence for encoding UTF8"
-            const sanitizedChunk = chunk.replace(/\x00/g, '');
-
-            // [FIX] Cung cấp TaskType.RETRIEVAL_DOCUMENT khi tạo embedding để lưu trữ.
-            // Đây là nguyên nhân gây ra lỗi 400 Bad Request.
-            const embedding = await aiService.generateEmbedding(sanitizedChunk, TaskType.RETRIEVAL_DOCUMENT);
-
+        for (let i = 0; i < sanitizedChunks.length; i++) {
+            const chunkContent = sanitizedChunks[i];
+            const chunkEmbedding = embeddings[i];
+            
             const newKnowledge = await knowledgeModel.create({
-                content: sanitizedChunk,
+                content: chunkContent,
                 category: category || 'Uncategorized',
                 source_document: originalName, // Dùng tên file gốc làm nguồn
-                embedding
+                embedding: chunkEmbedding
             });
             ingestedChunks.push(newKnowledge);
         }

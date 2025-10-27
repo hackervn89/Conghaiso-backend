@@ -79,22 +79,34 @@ const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
  * @returns {string} - Câu trả lời của AI.
  */
 const generateChatResponse = async ({ systemInstruction, history = [], prompt }) => {
-    try {
-        console.log("[AI Service] Using unified model with Google Search.");
+    const MAX_RETRIES = 3;
+    const INITIAL_RETRY_DELAY_MS = 2000; // Bắt đầu với 2 giây
 
-        // Bắt đầu chat với history được cung cấp
-        const chat = chatModel.startChat({ 
-            history: history,
-            systemInstruction: { role: "system", parts: [{ text: systemInstruction }] }
-        });
-        const result = await chat.sendMessage(prompt);
-        const response = await result.response;
-        
-        return response.text();
-    } catch (error) {
-        console.error('Lỗi khi gọi Gemini API (generateChatResponse):', error);
-        throw new Error('Lỗi khi lấy phản hồi từ AI');
+    const execute = async (retriesLeft, delay) => {
+        try {
+            console.log("[AI Service] Using unified model with Google Search.");
+
+            const chat = chatModel.startChat({ 
+                history: history,
+                systemInstruction: { role: "system", parts: [{ text: systemInstruction }] }
+            });
+            const result = await chat.sendMessage(prompt);
+            const response = await result.response;
+            
+            return response.text();
+        } catch (error) {
+            if (error.name === 'GoogleGenerativeAIFetchError' && (error.message.includes('503') || error.message.includes('429')) && retriesLeft > 0) {
+                console.warn(`[AI Service] Lỗi ${error.message.includes('503') ? '503' : '429'}. Thử lại sau ${delay / 1000} giây... (còn ${retriesLeft} lần thử)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return execute(retriesLeft - 1, delay * 2);
+            }
+            console.error('Lỗi khi gọi Gemini API (generateChatResponse) sau khi đã thử lại:', error);
+            // [NEW] Trả về câu trả lời giả định thay vì throw lỗi
+            return "Hệ thống đang hết lưu lượng truy cập do giới hạn về gói AI bạn đã thanh toán. Vui lòng nâng cấp lên gói cước cao hơn, hoặc liên hệ quản trị hệ thống.";
+        }
     }
+
+    return execute(MAX_RETRIES, INITIAL_RETRY_DELAY_MS);
 };
 
 module.exports = {
