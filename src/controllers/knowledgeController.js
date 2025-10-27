@@ -5,10 +5,11 @@ const fs = require('fs/promises');
 const pdf = require('pdf-extraction');
 const mammoth = require('mammoth');
 const path = require('path');
-const { TaskType } = require('@google/generative-ai');
+const { GoogleGenerativeAI, TaskType } = require('@google/generative-ai');
 
-const SIMILARITY_THRESHOLD = 0.8; // Ngưỡng tương đồng, có thể điều chỉnh
-
+const SIMILARITY_THRESHOLD = 0.5; // [FIX] Giảm ngưỡng để tạo chunk lớn hơn, giàu ngữ cảnh hơn.
+const MAX_TOKENS_PER_CHUNK = 50000; // [FIX] Giảm giới hạn token để chunk không quá dài, tránh làm nhiễu kết quả tìm kiếm.
+const OVERLAP_SENTENCES_COUNT = 3; // Số câu chồng lấn giữa các chunk
 /**
  * Tính toán độ tương đồng cosine giữa hai vector.
  * @param {number[]} vecA - Vector A.
@@ -36,12 +37,17 @@ function cosineSimilarity(vecA, vecB) {
  * @param {string} text - Nội dung văn bản.
  * @returns {string[]} - Mảng các chunks.
  */
-async function chunkText(text) {
-    const MAX_CHUNK_WORDS = 1500; // Giới hạn an toàn về số từ cho mỗi chunk
+async function chunkText(text, modelForTokens) { // Thêm tham số modelForTokens
 
-    // 1. Tách văn bản thành các câu.
-    // Sử dụng regex để tách câu một cách thông minh hơn, giữ lại dấu câu.
-    const rawSentences = text.match(/[^.!?]+[.!?]+(\s*|$)/g) || [text];
+    // 1. [REFACTOR] Tách văn bản thành các câu bằng regex mạnh mẽ hơn.
+    // Regex này tìm các điểm ngắt (split points) giữa các câu, xử lý tốt hơn các trường hợp
+    // như viết tắt (Mr., Dr.), số liệu (1.2.3), và URL.
+    // Nó tìm một khoảng trắng theo sau dấu câu cuối câu, nhưng không phải là dấu chấm trong từ viết tắt hoặc số.
+    const splitRegex = /(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|!)\s+/g;
+    // Thay thế các ký tự xuống dòng bằng khoảng trắng trước khi tách để đảm bảo regex hoạt động đúng.
+    const normalizedText = text.replace(/(\r\n|\n|\r)/gm, " ");
+    const rawSentences = normalizedText.split(splitRegex).filter(s => s.length > 0);
+
 
     // [FIX] Lọc ra các câu rỗng, chỉ chứa khoảng trắng, hoặc quá ngắn để tránh lỗi 400 từ Google API.
     // Một câu có ý nghĩa thường có ít nhất 10 ký tự.
@@ -51,7 +57,7 @@ async function chunkText(text) {
         // 1. Thay thế tất cả các ký tự xuống dòng bằng một khoảng trắng.
         // 2. Loại bỏ các ký tự điều khiển không in được.
         // 3. Loại bỏ các khoảng trắng thừa liên tiếp.
-        // 4. Loại bỏ khoảng trắng ở đầu/cuối.
+        // 4. Loại bỏ khoảng trắng ở đầu/cuối. (trim() đã được áp dụng trong split)
         return s.replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1F\x7F]/g, '').replace(/\s\s+/g, ' ').trim();
     })
     .filter(s => s.length >= MIN_SENTENCE_LENGTH);
@@ -80,16 +86,21 @@ async function chunkText(text) {
 
     for (let i = 0; i < similarities.length; i++) {
         const nextSentence = sentences[i + 1];
-        const currentChunkWordCount = currentChunkSentences.join(' ').split(/\s+/).length;
+        const potentialChunkContent = currentChunkSentences.join(' ') + ' ' + nextSentence;
+        // Sử dụng model.countTokens để đếm token chính xác
+        const { totalTokens: tokensWithNextSentence } = await modelForTokens.countTokens(potentialChunkContent);
 
         // Điều kiện ngắt:
         // 1. Ngắt theo ngữ nghĩa (độ tương đồng thấp).
-        // 2. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài).
-        if (similarities[i] < SIMILARITY_THRESHOLD || (currentChunkWordCount + nextSentence.split(/\s+/).length) > MAX_CHUNK_WORDS) {
+        // 2. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài theo token).
+        if (similarities[i] < SIMILARITY_THRESHOLD || tokensWithNextSentence > MAX_TOKENS_PER_CHUNK) {
+            // Lấy N câu cuối cùng của chunk hiện tại để làm phần chồng lấn.
+            const overlap = currentChunkSentences.slice(-OVERLAP_SENTENCES_COUNT);
             // Hoàn thành chunk hiện tại.
             chunks.push(currentChunkSentences.join(' ').trim());
-            // Bắt đầu một chunk mới với câu tiếp theo.
-            currentChunkSentences = [sentences[i + 1]];
+
+            // Bắt đầu một chunk mới với sự chồng lấn từ chunk trước và câu tiếp theo.
+            currentChunkSentences = [...overlap, sentences[i + 1]];
         } else {
             // Nếu các câu vẫn còn tương đồng, tiếp tục thêm vào chunk hiện tại.
             currentChunkSentences.push(sentences[i + 1]);
@@ -105,6 +116,9 @@ async function chunkText(text) {
 }
 
 const createKnowledge = async (req, res) => {
+    // Khởi tạo Gemini AI để đếm token
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // Sử dụng model phù hợp để đếm token
     try {
         // Thay vì 'content', chúng ta nhận 'tempFilePath' từ frontend
         const { category, tempFilePath } = req.body;
@@ -134,7 +148,7 @@ const createKnowledge = async (req, res) => {
         }
 
         // 3. Chia nhỏ (chunking) nội dung file
-        const chunks = await chunkText(fileContent);
+        const chunks = await chunkText(fileContent, modelForTokens); // Truyền modelForTokens vào hàm chunkText
         if (chunks.length === 0) {
             return res.status(400).json({ message: 'File content is too short or not formatted correctly to be chunked.' });
         }
