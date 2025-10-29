@@ -29,7 +29,8 @@ jobs:
             npm install --production
 
             echo "🔄 Khởi động lại ứng dụng backend với PM2..."
-            # Sử dụng 'restart' để đảm bảo ứng dụng được làm mới hoàn toàn
-            pm2 restart conghaiso-api
+            # [FIX] Sử dụng file ecosystem để đảm bảo biến môi trường được áp dụng đúng
+            # 'reload' sẽ cập nhật ứng dụng mà không có thời gian chết (zero-downtime)
+            pm2 reload ecosystem.config.js --env production
             
             echo "✅ Triển khai Backend thành công!"

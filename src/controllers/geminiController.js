@@ -10,8 +10,12 @@ const chatWithAI = async (req, res) => {
             return res.status(400).json({ message: 'Prompt is required.' });
         }
 
-        // --- Bước 1: Gọi đến "Bộ điều hướng" để lấy quyết định ---
-        const routerUrl = `${req.protocol}://${req.get('host')}/api/router/route-query`;
+        // --- Bước 1: Gọi đến "Bộ điều hướng" để lấy quyết định ---        
+        // [FIX] Xây dựng URL một cách đáng tin cậy hơn cho môi trường production.
+        // Khi chạy sau reverse proxy, req.protocol có thể là 'http' mặc dù client truy cập qua 'https'.
+        const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+        const host = req.get('host');
+        const routerUrl = `${protocol}://${host}/api/router/route-query`;
         const routerResponse = await axios.post(
             routerUrl,
             { prompt },
