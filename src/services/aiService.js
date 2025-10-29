@@ -76,24 +76,36 @@ const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
  * @param {string} options.systemInstruction - Chỉ dẫn hệ thống cho AI.
  * @param {Array} options.history - Lịch sử chat thực tế.
  * @param {string} options.prompt - Câu hỏi mới của người dùng.
- * @returns {string} - Câu trả lời của AI.
+ * @param {Array} options.tools - Danh sách các công cụ (function declarations) cho AI.
+ * @returns {object} - Một đối tượng chứa text và functionCalls.
  */
-const generateChatResponse = async ({ systemInstruction, history = [], prompt }) => {
+const generateChatResponse = async ({ systemInstruction, history = [], prompt, tools = [] }) => {
     const MAX_RETRIES = 3;
     const INITIAL_RETRY_DELAY_MS = 2000; // Bắt đầu với 2 giây
 
     const execute = async (retriesLeft, delay) => {
         try {
-            console.log("[AI Service] Using unified model with Google Search.");
-
-            const chat = chatModel.startChat({ 
+            const modelParams = {
                 history: history,
-                systemInstruction: { role: "system", parts: [{ text: systemInstruction }] }
-            });
+                systemInstruction: systemInstruction ? { role: "system", parts: [{ text: systemInstruction }] } : undefined,
+                tools: tools
+            };
+
+            // [LOGGING] Thêm log chi tiết ngay trước khi gọi API
+            console.log('\n--- [AI Service] Gửi yêu cầu đến Gemini API ---');
+            console.log('  - Model Params (startChat):', JSON.stringify(modelParams, null, 2));
+            console.log('  - Prompt (sendMessage):', JSON.stringify(prompt, null, 2));
+            console.log('--------------------------------------------\n');
+
+
+            // Lọc ra các thuộc tính undefined để không gửi lên API
+            Object.keys(modelParams).forEach(key => modelParams[key] === undefined && delete modelParams[key]);
+
+            const chat = chatModel.startChat(modelParams);
             const result = await chat.sendMessage(prompt);
             const response = await result.response;
             
-            return response.text();
+            return { text: response.text(), functionCalls: response.functionCalls() };
         } catch (error) {
             if (error.name === 'GoogleGenerativeAIFetchError' && (error.message.includes('503') || error.message.includes('429')) && retriesLeft > 0) {
                 console.warn(`[AI Service] Lỗi ${error.message.includes('503') ? '503' : '429'}. Thử lại sau ${delay / 1000} giây... (còn ${retriesLeft} lần thử)`);
@@ -101,8 +113,8 @@ const generateChatResponse = async ({ systemInstruction, history = [], prompt })
                 return execute(retriesLeft - 1, delay * 2);
             }
             console.error('Lỗi khi gọi Gemini API (generateChatResponse) sau khi đã thử lại:', error);
-            // [NEW] Trả về câu trả lời giả định thay vì throw lỗi
-            return "Hệ thống đang hết lưu lượng truy cập do giới hạn về gói AI bạn đã thanh toán. Vui lòng nâng cấp lên gói cước cao hơn, hoặc liên hệ quản trị hệ thống.";
+            // [NEW] Trả về đối tượng lỗi thay vì throw
+            return { text: "Hệ thống đang hết lưu lượng truy cập do giới hạn về gói AI bạn đã thanh toán. Vui lòng nâng cấp lên gói cước cao hơn, hoặc liên hệ quản trị hệ thống.", functionCalls: [] };
         }
     }
 

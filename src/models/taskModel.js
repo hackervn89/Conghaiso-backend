@@ -100,7 +100,11 @@ const buildTaskQuery = (user, filters) => {
 };
 
 const findAll = async (user, filters) => {
-    const { page, limit, sortBy, sortDirection } = filters;
+    // [FIX] Thêm giá trị mặc định cho page và limit để tránh lỗi NaN khi không được cung cấp.
+    // Điều này rất quan trọng khi hàm được gọi từ AI tool (không có tham số phân trang).
+    const page = filters.page || 1;
+    const limit = filters.limit || 15; // Hoặc một giá trị mặc định hợp lý khác
+    const { sortBy, sortDirection } = filters;
     const offset = (page - 1) * limit;
 
     const { whereString, joinString, params, paramIndex } = buildTaskQuery(user, filters);

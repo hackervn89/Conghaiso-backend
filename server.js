@@ -20,7 +20,6 @@ const summarizeRoutes = require('./src/routes/summarizeRoutes');
 const fileRoutes = require('./src/routes/fileRoutes');
 const draftRoutes = require('./src/routes/draftRoutes');
 const knowledgeRoutes = require('./src/routes/knowledgeRoutes'); // [AI-FEATURE]
-const geminiQueryRouter = require('./src/routes/geminiQueryRouter'); // [AI-FEATURE ROUTER]
 const anchorKeywordRoutes = require('./src/routes/anchorKeywordRoutes'); // [AI-FEATURE]
 const geminiRoutes = require('./src/routes/geminiRoutes'); // [AI-FEATURE]
 
@@ -159,7 +158,6 @@ app.use('/api/summarize', summarizeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/drafts', draftRoutes);
 app.use('/api/knowledge', knowledgeRoutes); // [AI-FEATURE]
-app.use('/api/router', geminiQueryRouter); // [AI-FEATURE ROUTER]
 app.use('/api/anchor-keywords', anchorKeywordRoutes); // [AI-FEATURE]
 app.use('/api', geminiRoutes); // [AI-FEATURE] for /api/chat
 
