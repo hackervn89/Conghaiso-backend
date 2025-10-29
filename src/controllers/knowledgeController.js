@@ -118,7 +118,7 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
 const createKnowledge = async (req, res) => {
     // Khởi tạo Gemini AI để đếm token
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // Sử dụng model phù hợp để đếm token
+    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" }); // [TỐI ƯU] Dùng Flash-Lite để đếm token
     try {
         // Thay vì 'content', chúng ta nhận 'tempFilePath' từ frontend
         const { category, tempFilePath } = req.body;
