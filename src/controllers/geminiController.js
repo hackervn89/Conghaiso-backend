@@ -72,7 +72,8 @@ CHỈ DẪN QUAN TRỌNG:
             const ragPayload = {
                 systemInstruction: systemInstruction,
                 history: [...history],
-                prompt: prompt
+                prompt: prompt,
+                tools: [{ "google_search": {} }] // [FIX] Bật Google Search cho cả luồng RAG
             };
             console.log('  - Gửi yêu cầu đến Gemini với ngữ cảnh RAG (Payload bên dưới)');
 
@@ -127,7 +128,10 @@ CHỈ DẪN QUAN TRỌNG:
             } else {
                 // AI không tìm thấy công cụ CSDL nào phù hợp -> Dùng Google Search
                 console.log('[AI Chat] Model không gọi hàm CSDL. Sử dụng câu trả lời trực tiếp (đã được hỗ trợ bởi Google Search).');
-                finalReply = modelResponse.text; // Câu trả lời này đã được tạo với Google Search bật sẵn, không cần thêm chỉ dẫn.
+                // [FIX] Mặc dù model chính đã bật search, việc gọi lại với cờ google_search rõ ràng
+                // đảm bảo AI sẽ ưu tiên tìm kiếm nếu câu trả lời ban đầu không đủ tốt.
+                const fallbackResponse = await aiService.generateChatResponse({ history: [...history], prompt: prompt, tools: [{ "google_search": {} }] });
+                finalReply = fallbackResponse.text;
             }
         }
 
