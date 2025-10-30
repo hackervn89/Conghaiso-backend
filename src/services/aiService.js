@@ -9,8 +9,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // [REFACTOR] Sử dụng hai model để tối ưu chi phí và hiệu năng theo đúng yêu cầu.
 // Model Flash Lite: Rất nhanh, rất rẻ, phù hợp cho các tác vụ định tuyến, phân loại, tóm tắt đơn giản.
 const flashLiteModel = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash-lite",
-    tools: [{ "google_search": {} }], // Bật Google Search
+    model: "gemini-2.5-flash-lite",    
 });
 
 // Model Flash: Mạnh hơn, thông minh hơn, phù hợp cho các tác vụ suy luận phức tạp, tổng hợp câu trả lời chất lượng cao.

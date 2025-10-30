@@ -14,10 +14,6 @@ const buildTaskQuery = (user, filters) => {
     const params = [];
     let paramIndex = 1;
 
-    // --- [DEBUG] Ghi log thông tin người dùng và bộ lọc ---
-    console.log(`[TaskQuery Debug] User ID: ${user.user_id}, Role: ${user.role}, Managed Scopes: ${JSON.stringify(user.managedScopes)}`);
-    console.log(`[TaskQuery Debug] Filters: ${JSON.stringify(filters)}`);
-
     // --- [SỬA LỖI TRIỆT ĐỂ] Tái cấu trúc logic phân quyền bằng EXISTS ---
     if (user.role !== 'Admin' && user.role !== 'Secretary') {
         const permissionConditions = [];
@@ -36,7 +32,6 @@ const buildTaskQuery = (user, filters) => {
 
         // Các điều kiện cho Lãnh đạo (dùng EXISTS)
         if (user.managedScopes && user.managedScopes.length > 0) {
-            console.log('[TaskQuery Debug] Áp dụng điều kiện cho Lãnh đạo.');
             // 4. User là Lãnh đạo của đơn vị được giao công việc
             permissionConditions.push(`EXISTS (SELECT 1 FROM task_assigned_orgs WHERE task_id = t.task_id AND org_id = ANY($${paramIndex}::int[]))`);
             params.push(user.managedScopes);
@@ -47,13 +42,8 @@ const buildTaskQuery = (user, filters) => {
             params.push(user.managedScopes);
             paramIndex++;
         }
-        else {
-            console.log('[TaskQuery Debug] Không có managedScopes, bỏ qua điều kiện Lãnh đạo.');
-        }
 
         whereClauses.push(`(${permissionConditions.join(' OR ')})`);
-        // --- [DEBUG] Ghi log các điều kiện phân quyền ---
-        console.log(`[TaskQuery Debug] Permission Conditions: ${permissionConditions.join(' OR ')}`);
     }
 
     // Lọc theo trạng thái động
@@ -127,10 +117,6 @@ const buildTaskQuery = (user, filters) => {
     const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const joinString = [...joins].join(' ');
 
-    // --- [DEBUG] Ghi log mệnh đề WHERE và các tham số cuối cùng ---
-    console.log(`[TaskQuery Debug] Final WHERE clause: ${whereString}`);
-    console.log(`[TaskQuery Debug] Final PARAMS: ${JSON.stringify(params)}`);
-
     return { whereString, joinString, params, paramIndex };
 };
 
@@ -181,9 +167,6 @@ const findAll = async (user, filters) => {
 
     const { clause: orderByClause, extraSelect: extraSelectColumn } = buildOrderByClause();
 
-    // --- [DEBUG] Ghi log câu truy vấn đếm và truy vấn lấy ID ---
-    console.log(`[TaskQuery Debug] Count Query: SELECT COUNT(DISTINCT t.task_id) FROM tasks t ${joinString} ${whereString}`);
-
     // --- 1. Thực thi 2 truy vấn song song: Đếm tổng số và Lấy ID của trang hiện tại ---
     const countQuery = `SELECT COUNT(DISTINCT t.task_id) FROM tasks t ${joinString} ${whereString}`;
     
@@ -195,8 +178,6 @@ const findAll = async (user, filters) => {
         ${orderByClause}
         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
-
-    console.log(`[TaskQuery Debug] Data Query (IDs): ${dataQuery.replace(/\s+/g, ' ')}`);
 
     const [countResult, taskIdsResult] = await Promise.all([
         db.query(countQuery, params),
