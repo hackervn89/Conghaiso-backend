@@ -18,33 +18,33 @@ const buildTaskQuery = (user, filters) => {
     if (user.role !== 'Admin' && user.role !== 'Secretary') {
         joins.add('LEFT JOIN task_trackers tt ON t.task_id = tt.task_id');
         joins.add('LEFT JOIN task_assigned_orgs tao ON t.task_id = tao.task_id');
-
+        
         const permissionConditions = [];
-        let currentParamIndex = paramIndex;
 
         // 1. User là người tạo
-        permissionConditions.push(`t.creator_id = $${currentParamIndex}`);
+        permissionConditions.push(`t.creator_id = $${paramIndex}`);
         // 2. User là người theo dõi
-        permissionConditions.push(`tt.user_id = $${currentParamIndex}`);
+        permissionConditions.push(`tt.user_id = $${paramIndex}`);
         // 3. User thuộc đơn vị được giao
-        joins.add('LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id AND uo.user_id = $${currentParamIndex}');
+        joins.add(`LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id AND uo.user_id = $${paramIndex}`);
         permissionConditions.push(`uo.user_id IS NOT NULL`);
 
         params.push(user.user_id);
-        currentParamIndex++;
+        paramIndex++;
 
-        // 4. [MỚI] User là Lãnh đạo của đơn vị được giao
+        // --- [SỬA LỖI LOGIC QUAN TRỌNG] ---
+        // Các điều kiện cho Lãnh đạo phải độc lập và không phụ thuộc vào user_id của các điều kiện trên.
         if (user.managedScopes && user.managedScopes.length > 0) {
-            permissionConditions.push(`tao.org_id = ANY($${currentParamIndex}::int[])`);
+            // 4. User là Lãnh đạo của đơn vị được giao
+            permissionConditions.push(`tao.org_id = ANY($${paramIndex}::int[])`);
             params.push(user.managedScopes);
-            currentParamIndex++;
-            // 5. [MỚI] User là Lãnh đạo và công việc được tạo bởi người dùng thuộc đơn vị mà lãnh đạo quản lý
+            paramIndex++;
+            // 5. User là Lãnh đạo và công việc được tạo bởi người dùng thuộc đơn vị mà lãnh đạo quản lý
             joins.add('LEFT JOIN user_organizations creator_uo ON t.creator_id = creator_uo.user_id');
-            permissionConditions.push(`creator_uo.org_id = ANY($${currentParamIndex}::int[])`);
+            permissionConditions.push(`creator_uo.org_id = ANY($${paramIndex}::int[])`);
             params.push(user.managedScopes);
-            currentParamIndex++;
+            paramIndex++;
         }
-        paramIndex = currentParamIndex;
 
         whereClauses.push(`(${permissionConditions.join(' OR ')})`);
     }
