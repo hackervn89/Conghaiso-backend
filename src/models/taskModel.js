@@ -14,15 +14,39 @@ const buildTaskQuery = (user, filters) => {
     const params = [];
     let paramIndex = 1;
 
-    // Phân quyền: User thường chỉ thấy công việc họ tạo, được giao, hoặc theo dõi.
-    // Admin/Secretary thấy tất cả.
+    // --- [CẢI TIẾN] Logic phân quyền xem công việc ---
     if (user.role !== 'Admin' && user.role !== 'Secretary') {
         joins.add('LEFT JOIN task_trackers tt ON t.task_id = tt.task_id');
         joins.add('LEFT JOIN task_assigned_orgs tao ON t.task_id = tao.task_id');
-        joins.add('LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id');
-        whereClauses.push(`(t.creator_id = $${paramIndex} OR tt.user_id = $${paramIndex} OR uo.user_id = $${paramIndex})`);
+
+        const permissionConditions = [];
+        let currentParamIndex = paramIndex;
+
+        // 1. User là người tạo
+        permissionConditions.push(`t.creator_id = $${currentParamIndex}`);
+        // 2. User là người theo dõi
+        permissionConditions.push(`tt.user_id = $${currentParamIndex}`);
+        // 3. User thuộc đơn vị được giao
+        joins.add('LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id AND uo.user_id = $${currentParamIndex}');
+        permissionConditions.push(`uo.user_id IS NOT NULL`);
+
         params.push(user.user_id);
-        paramIndex++;
+        currentParamIndex++;
+
+        // 4. [MỚI] User là Lãnh đạo của đơn vị được giao
+        if (user.managedScopes && user.managedScopes.length > 0) {
+            permissionConditions.push(`tao.org_id = ANY($${currentParamIndex}::int[])`);
+            params.push(user.managedScopes);
+            currentParamIndex++;
+            // 5. [MỚI] User là Lãnh đạo và công việc được tạo bởi người dùng thuộc đơn vị mà lãnh đạo quản lý
+            joins.add('LEFT JOIN user_organizations creator_uo ON t.creator_id = creator_uo.user_id');
+            permissionConditions.push(`creator_uo.org_id = ANY($${currentParamIndex}::int[])`);
+            params.push(user.managedScopes);
+            currentParamIndex++;
+        }
+        paramIndex = currentParamIndex;
+
+        whereClauses.push(`(${permissionConditions.join(' OR ')})`);
     }
 
     // Lọc theo trạng thái động
