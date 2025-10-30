@@ -6,8 +6,15 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // --- Các Model được khởi tạo ---
 
-// [REFACTOR] Chỉ sử dụng một model duy nhất, có khả năng tìm kiếm Google.
-const chatModel = genAI.getGenerativeModel({
+// [REFACTOR] Sử dụng hai model để tối ưu chi phí và hiệu năng theo đúng yêu cầu.
+// Model Flash Lite: Rất nhanh, rất rẻ, phù hợp cho các tác vụ định tuyến, phân loại, tóm tắt đơn giản.
+const flashLiteModel = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash-lite",
+    tools: [{ "google_search": {} }], // Bật Google Search
+});
+
+// Model Flash: Mạnh hơn, thông minh hơn, phù hợp cho các tác vụ suy luận phức tạp, tổng hợp câu trả lời chất lượng cao.
+const flashModel = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     tools: [{ "google_search": {} }], // Bật Google Search
 });
@@ -78,10 +85,15 @@ const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
  * @param {string} options.prompt - Câu hỏi mới của người dùng.
  * @param {Array} options.tools - Danh sách các công cụ (function declarations) cho AI.
  * @returns {object} - Một đối tượng chứa text và functionCalls.
+ * @param {('flash-lite'|'flash')} [options.modelType='flash'] - Loại model cần sử dụng. Mặc định là 'flash' (model mạnh hơn).
  */
-const generateChatResponse = async ({ systemInstruction, history = [], prompt, tools = [] }) => {
+const generateChatResponse = async ({ systemInstruction, history = [], prompt, tools = [], modelType = 'flash' }) => {
     const MAX_RETRIES = 3;
     const INITIAL_RETRY_DELAY_MS = 2000; // Bắt đầu với 2 giây
+
+    // Chọn model dựa trên tham số
+    const chatModel = modelType === 'flash-lite' ? flashLiteModel : flashModel;
+    const modelName = modelType === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
 
     const execute = async (retriesLeft, delay) => {
         try {
@@ -93,7 +105,7 @@ const generateChatResponse = async ({ systemInstruction, history = [], prompt, t
 
             // [LOGGING] Thêm log chi tiết ngay trước khi gọi API
             console.log('\n--- [AI Service] Gửi yêu cầu đến Gemini API ---');
-            console.log('  - Model Params (startChat):', JSON.stringify(modelParams, null, 2));
+            console.log(`  - Model: ${modelName} | Params (startChat):`, JSON.stringify(modelParams, null, 2));
             console.log('  - Prompt (sendMessage):', JSON.stringify(prompt, null, 2));
             console.log('--------------------------------------------\n');
 

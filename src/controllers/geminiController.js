@@ -72,11 +72,13 @@ CHỈ DẪN QUAN TRỌNG:
             const ragPayload = {
                 systemInstruction: systemInstruction,
                 history: [...history],
-                prompt: prompt
+                prompt: prompt,
+                tools: [{ "google_search": {} }],
+                modelType: 'flash' // Luồng RAG cần suy luận tốt, dùng Flash Model
             };
             console.log('  - Gửi yêu cầu đến Gemini với ngữ cảnh RAG (Payload bên dưới)');
 
-            const ragResponse = await aiService.generateChatResponse(ragPayload);
+            const ragResponse = await aiService.generateChatResponse(ragPayload); // Mặc định đã là 'flash'
             finalReply = ragResponse.text;
 
         } else { // decision === 'USE_EXTERNAL_TOOLS'
@@ -89,10 +91,11 @@ CHỈ DẪN QUAN TRỌNG:
             const firstCallPayload = {
                 history: [...history],
                 prompt: prompt,
-                tools: [{ function_declarations: externalTools }, { "google_search": {} }]
+                tools: [{ function_declarations: externalTools }, { "google_search": {} }],
+                modelType: 'flash-lite' // Dùng Flash-Lite để quyết định công cụ cho nhanh và rẻ
             };
             console.log('  - Gửi yêu cầu đến Gemini để quyết định công cụ (Payload bên dưới)');
-            const modelResponse = await aiService.generateChatResponse(firstCallPayload);
+            const modelResponse = await aiService.generateChatResponse(firstCallPayload); // Gọi Flash-Lite Model
             const functionCalls = modelResponse.functionCalls;
 
             if (functionCalls && functionCalls.length > 0) {
@@ -118,16 +121,20 @@ CHỈ DẪN QUAN TRỌNG:
                         { role: "model", parts: functionCalls.map(fc => ({ function_call: fc })) }
                     ],
                     systemInstruction: `Bạn là trợ lý ảo chuyên nghiệp. Dựa vào kết quả từ các công cụ được cung cấp, hãy trả lời câu hỏi của người dùng. Tuyệt đối không nhắc đến việc bạn có dùng "công cụ" hay "hàm". Hãy trả lời một cách tự nhiên giống như đây là việc bạn đã biết vể việc đó chính xác. Chỉ trích dẫn nguồn tại liệu khi nào thấy cần thiết nhất.`,
-                    prompt: toolResults.map(tr => tr.part)
+                    prompt: toolResults.map(tr => tr.part),
+                    modelType: 'flash' // Dùng Flash để tổng hợp câu trả lời chất lượng cao
                 };
                 console.log('  - Gửi kết quả công cụ trở lại Gemini để tổng hợp câu trả lời...');
-                const secondResponse = await aiService.generateChatResponse(secondCallPayload);
+                const secondResponse = await aiService.generateChatResponse(secondCallPayload); // Gọi Flash Model
                 finalReply = secondResponse.text;
 
             } else {
                 // AI không tìm thấy công cụ CSDL nào phù hợp -> Dùng Google Search
                 console.log('[AI Chat] Model không gọi hàm CSDL. Sử dụng câu trả lời trực tiếp (đã được hỗ trợ bởi Google Search).');
-                finalReply = modelResponse.text; // Câu trả lời này đã được tạo với Google Search bật sẵn, không cần thêm chỉ dẫn.
+                // [FIX] Mặc dù model chính đã bật search, việc gọi lại với cờ google_search rõ ràng
+                // đảm bảo AI sẽ ưu tiên tìm kiếm nếu câu trả lời ban đầu không đủ tốt.
+                const fallbackResponse = await aiService.generateChatResponse({ history: [...history], prompt: prompt, tools: [{ "google_search": {} }], modelType: 'flash' });
+                finalReply = fallbackResponse.text;
             }
         }
 
