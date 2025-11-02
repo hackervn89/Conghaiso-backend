@@ -14,15 +14,36 @@ const buildTaskQuery = (user, filters) => {
     const params = [];
     let paramIndex = 1;
 
-    // Phân quyền: User thường chỉ thấy công việc họ tạo, được giao, hoặc theo dõi.
-    // Admin/Secretary thấy tất cả.
+    // --- [SỬA LỖI TRIỆT ĐỂ] Tái cấu trúc logic phân quyền bằng EXISTS ---
     if (user.role !== 'Admin' && user.role !== 'Secretary') {
-        joins.add('LEFT JOIN task_trackers tt ON t.task_id = tt.task_id');
-        joins.add('LEFT JOIN task_assigned_orgs tao ON t.task_id = tao.task_id');
-        joins.add('LEFT JOIN user_organizations uo ON tao.org_id = uo.org_id');
-        whereClauses.push(`(t.creator_id = $${paramIndex} OR tt.user_id = $${paramIndex} OR uo.user_id = $${paramIndex})`);
+        const permissionConditions = [];
+
+        // 1. User là người tạo
+        permissionConditions.push(`t.creator_id = $${paramIndex}`);
+
+        // 2. User là người theo dõi (dùng EXISTS)
+        permissionConditions.push(`EXISTS (SELECT 1 FROM task_trackers WHERE task_id = t.task_id AND user_id = $${paramIndex})`);
+
+        // 3. User thuộc đơn vị được giao (dùng EXISTS)
+        permissionConditions.push(`EXISTS (SELECT 1 FROM task_assigned_orgs tao JOIN user_organizations uo ON tao.org_id = uo.org_id WHERE tao.task_id = t.task_id AND uo.user_id = $${paramIndex})`);
+
         params.push(user.user_id);
         paramIndex++;
+
+        // Các điều kiện cho Lãnh đạo (dùng EXISTS)
+        if (user.managedScopes && user.managedScopes.length > 0) {
+            // 4. User là Lãnh đạo của đơn vị được giao công việc
+            permissionConditions.push(`EXISTS (SELECT 1 FROM task_assigned_orgs WHERE task_id = t.task_id AND org_id = ANY($${paramIndex}::int[]))`);
+            params.push(user.managedScopes);
+            paramIndex++;
+
+            // 5. User là Lãnh đạo của đơn vị có người tạo ra công việc
+            permissionConditions.push(`EXISTS (SELECT 1 FROM user_organizations WHERE user_id = t.creator_id AND org_id = ANY($${paramIndex}::int[]))`);
+            params.push(user.managedScopes);
+            paramIndex++;
+        }
+
+        whereClauses.push(`(${permissionConditions.join(' OR ')})`);
     }
 
     // Lọc theo trạng thái động
@@ -80,7 +101,7 @@ const buildTaskQuery = (user, filters) => {
 
     // Lọc theo phòng ban được giao
     if (orgId) {
-        joins.add('JOIN task_assigned_orgs tao_filter ON t.task_id = tao_filter.task_id');
+        joins.add('JOIN task_assigned_orgs tao_filter ON t.task_id = tao_filter.task_id'); // Giữ lại JOIN này vì nó là để lọc, không phải để phân quyền
         whereClauses.push(`tao_filter.org_id = $${paramIndex}`);
         params.push(orgId);
         paramIndex++;

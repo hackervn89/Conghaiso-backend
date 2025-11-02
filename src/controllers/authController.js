@@ -16,18 +16,22 @@ const login = async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ message: 'Tên đăng nhập hoặc mật khẩu không đúng.' });
     }
-    const payload = { userId: user.user_id, username: user.username, role: user.role };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
 
+    // [SỬA LỖI QUAN TRỌNG]
+    // Lấy managedScopes TRƯỚC KHI tạo token để đưa vào payload.
     let managedScopes = [];
     // Lấy phạm vi quản lý cho cả Secretary và Leader
     if (user.role === 'Secretary') {
       managedScopes = await userModel.getSecretaryScopes(user.user_id);
     } else {
-      // Kiểm tra xem người dùng có phải là Leader của đơn vị nào không
       const leaderScopes = await userModel.getLeaderScopes(user.user_id);
       if (leaderScopes.length > 0) managedScopes = leaderScopes;
     }
+
+    // Tạo payload đầy đủ thông tin
+    const payload = { userId: user.user_id, username: user.username, role: user.role, managedScopes: managedScopes };
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
+
     res.status(200).json({
       message: 'Đăng nhập thành công!',
       token: token,

@@ -9,13 +9,20 @@ const authenticate = async (req, res, next) => {
     try {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
-      // Gắn thông tin user (trừ password) vào request để các hàm sau có thể dùng
-      req.user = await userModel.findById(decoded.userId); 
 
-      if (!req.user) {
+      // Lấy thông tin mới nhất của user từ DB để đảm bảo không dùng dữ liệu cũ
+      const freshUserFromDb = await userModel.findById(decoded.userId);
+
+      if (!freshUserFromDb) {
         return res.status(401).json({ message: 'Người dùng không tồn tại.' });
       }
+
+      // [SỬA LỖI TRIỆT ĐỂ]
+      // Gán đối tượng người dùng từ CSDL làm cơ sở.
+      req.user = freshUserFromDb;
+      // Sau đó, chỉ gắn thêm thuộc tính 'managedScopes' từ token đã giải mã vào.
+      // Điều này đảm bảo tính nhất quán của đối tượng user và bổ sung đúng quyền hạn.
+      req.user.managedScopes = decoded.managedScopes;
 
       next(); // Token hợp lệ, cho phép đi tiếp
     } catch (error) {
