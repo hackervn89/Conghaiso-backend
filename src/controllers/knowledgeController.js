@@ -38,6 +38,7 @@ function cosineSimilarity(vecA, vecB) {
  * @returns {string[]} - Mảng các chunks.
  */
 async function chunkText(text, modelForTokens) { // Thêm tham số modelForTokens
+    console.log('[Chunking] Starting structural and semantic chunking process...');
 
     // 1. [REFACTOR] Tách văn bản thành các câu bằng regex mạnh mẽ hơn.
     // Regex này tìm các điểm ngắt (split points) giữa các câu, xử lý tốt hơn các trường hợp
@@ -69,45 +70,87 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
         return [sentences[0]];
     }
 
-    // 2. Tạo embedding cho tất cả các câu.
-    // Sử dụng batchEmbedContents để hiệu quả hơn.
+    // 2. [NEW] Xác định các câu là tiêu đề (Structural Chunking)
+    // Regex này tìm các mẫu như: "Chương I:", "Điều 5.", "1.2.", "a)", "Phần thứ nhất"
+    const headingRegex = /^(Chương\s+[IVXLCDM]+[:.]?|Điều\s+\d+[:.]?|Phần\s+\w+[:.]?|\d+(\.\d+)*\.?|[a-z]\))/i;
+    const sentenceHeadings = sentences.map((sentence, index) => ({
+        text: sentence,
+        isHeading: headingRegex.test(sentence.trim()),
+        originalIndex: index
+    }));
+
+    // 3. Tạo embedding cho tất cả các câu để chuẩn bị cho semantic split nếu cần.
     const embeddings = await aiService.generateEmbedding(sentences, TaskType.SEMANTIC_SIMILARITY);
 
-    // 3. Tính toán độ tương đồng giữa các câu liên tiếp.
+    // 4. Tính toán độ tương đồng giữa các câu liên tiếp.
     const similarities = [];
     for (let i = 0; i < embeddings.length - 1; i++) {
         const sim = cosineSimilarity(embeddings[i], embeddings[i + 1]);
         similarities.push(sim);
     }
 
-    // 4. Xác định các điểm ngắt (split points) dựa trên ngưỡng.
+    // 5. [NEW] Logic chia chunk kết hợp cấu trúc và ngữ nghĩa
     const chunks = [];
-    let currentChunkSentences = [sentences[0]];
+    let currentChunkSentences = [];
+    let currentHeading = null;
 
-    for (let i = 0; i < similarities.length; i++) {
-        const nextSentence = sentences[i + 1];
-        const potentialChunkContent = currentChunkSentences.join(' ') + ' ' + nextSentence;
-        // Sử dụng model.countTokens để đếm token chính xác
-        const { totalTokens: tokensWithNextSentence } = await modelForTokens.countTokens(potentialChunkContent);
+    for (let i = 0; i < sentences.length; i++) {
+        const sentence = sentences[i];
+        const isHeading = sentenceHeadings.find(h => h.originalIndex === i).isHeading;
 
-        // Điều kiện ngắt:
-        // 1. Ngắt theo ngữ nghĩa (độ tương đồng thấp).
-        // 2. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài theo token).
-        if (similarities[i] < SIMILARITY_THRESHOLD || tokensWithNextSentence > MAX_TOKENS_PER_CHUNK) {
-            // Lấy N câu cuối cùng của chunk hiện tại để làm phần chồng lấn.
+        // Kiểm tra xem có nên ngắt chunk hay không
+        let shouldSplit = false;
+        if (i > 0) {
+            const similarity = similarities[i - 1];
+            const potentialChunkContent = [...currentChunkSentences, sentence].join(' ');
+            const { totalTokens: tokensWithNextSentence } = await modelForTokens.countTokens(potentialChunkContent);
+
+            // Điều kiện ngắt:
+            // 1. Gặp một tiêu đề mới.
+            // 2. Ngắt theo ngữ nghĩa (độ tương đồng thấp).
+            // 3. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài).
+            if (isHeading || similarity < SIMILARITY_THRESHOLD || tokensWithNextSentence > MAX_TOKENS_PER_CHUNK) {
+                shouldSplit = true;
+            }
+        }
+
+        if (shouldSplit) {
+            // Hoàn thành chunk hiện tại
+            if (currentChunkSentences.length > 0) {
+                let chunkContent = currentChunkSentences.join(' ').trim();
+                // [QUAN TRỌNG] Gắn tiêu đề vào đầu chunk nếu có
+                if (currentHeading) {
+                    chunkContent = `Tiêu đề: ${currentHeading}\nNội dung: ${chunkContent}`;
+                }
+                chunks.push(chunkContent);
+            }
+
+            // Bắt đầu chunk mới
             const overlap = currentChunkSentences.slice(-OVERLAP_SENTENCES_COUNT);
-            // Hoàn thành chunk hiện tại.
-            chunks.push(currentChunkSentences.join(' ').trim());
+            currentChunkSentences = isHeading ? [...overlap] : [...overlap, sentence];
 
-            // Bắt đầu một chunk mới với sự chồng lấn từ chunk trước và câu tiếp theo.
-            currentChunkSentences = [...overlap, sentences[i + 1]];
         } else {
-            // Nếu các câu vẫn còn tương đồng, tiếp tục thêm vào chunk hiện tại.
-            currentChunkSentences.push(sentences[i + 1]);
+            currentChunkSentences.push(sentence);
+        }
+
+        // Nếu câu hiện tại là một tiêu đề, cập nhật nó cho các chunk tiếp theo
+        if (isHeading) {
+            currentHeading = sentence.trim();
+            // Nếu câu tiêu đề cũng là nội dung, thêm nó vào chunk
+            if (!shouldSplit) {
+                 currentChunkSentences.push(sentence);
+            }
         }
     }
+
     // Thêm chunk cuối cùng vào danh sách.
-    chunks.push(currentChunkSentences.join(' ').trim());
+    if (currentChunkSentences.length > 0) {
+        let lastChunkContent = currentChunkSentences.join(' ').trim();
+        if (currentHeading) {
+            lastChunkContent = `Tiêu đề: ${currentHeading}\nNội dung: ${lastChunkContent}`;
+        }
+        chunks.push(lastChunkContent);
+    }
 
     // LỌC BỎ các chunk rỗng hoặc chỉ chứa khoảng trắng
     const validChunks = chunks.map(chunk => chunk.trim()).filter(chunk => chunk.length > 0);
@@ -246,4 +289,49 @@ const getKnowledgeById = async (req, res) => {
     }
 };
 
-module.exports = { createKnowledge, updateKnowledge, deleteKnowledge, getKnowledgeList, getKnowledgeById };
+/**
+ * [NEW] Tạo tri thức từ các đoạn văn bản (chunks) được cung cấp sẵn.
+ * Hữu ích khi người dùng muốn tự chia nhỏ tài liệu theo cách thủ công.
+ * @param {object} req - Request object. Body chứa { chunks: string[], category: string, source_document: string }.
+ * @param {object} res - Response object.
+ */
+const createKnowledgeFromText = async (req, res) => {
+    try {
+        const { chunks, category, source_document } = req.body;
+
+        if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
+            return res.status(400).json({ message: '`chunks` phải là một mảng các đoạn văn bản và không được rỗng.' });
+        }
+        if (!source_document) {
+            return res.status(400).json({ message: '`source_document` là bắt buộc để biết nguồn gốc của tri thức.' });
+        }
+
+        // 1. Tạo embedding cho tất cả các chunk trong một lần gọi
+        console.log(`[Knowledge From Text] Generating embeddings for ${chunks.length} pre-defined chunks...`);
+        const sanitizedChunks = chunks.map(chunk => chunk.replace(/\x00/g, '').trim()).filter(chunk => chunk.length > 0);
+        const embeddings = await aiService.generateEmbedding(sanitizedChunks, TaskType.RETRIEVAL_DOCUMENT);
+
+        if (embeddings.length !== sanitizedChunks.length) {
+            throw new Error('Mismatch between number of chunks and generated embeddings.');
+        }
+
+        // 2. Lặp và lưu vào CSDL
+        const ingestedChunks = [];
+        for (let i = 0; i < sanitizedChunks.length; i++) {
+            const newKnowledge = await knowledgeModel.create({
+                content: sanitizedChunks[i],
+                category: category || 'Uncategorized',
+                source_document: source_document,
+                embedding: embeddings[i]
+            });
+            ingestedChunks.push(newKnowledge);
+        }
+
+        res.status(201).json({ message: `Successfully ingested ${ingestedChunks.length} knowledge chunks from manual text input for ${source_document}.`, chunks: ingestedChunks });
+    } catch (error) {
+        console.error('Error creating knowledge from text:', error);
+        res.status(500).json({ message: 'Server error while creating knowledge from text.' });
+    }
+};
+
+module.exports = { createKnowledge, updateKnowledge, deleteKnowledge, getKnowledgeList, getKnowledgeById, createKnowledgeFromText };

@@ -6,6 +6,9 @@ const { authenticate, authorize } = require('../middleware/authMiddleware');
 // Áp dụng middleware bảo vệ và kiểm tra quyền admin cho tất cả các route bên dưới
 router.use(authenticate, authorize(['Admin']));
 
+// [NEW] Route để ingest các chunk văn bản đã được chia thủ công
+router.post('/from-text', knowledgeController.createKnowledgeFromText);
+
 router.route('/')
     .post(knowledgeController.createKnowledge)
     .get(knowledgeController.getKnowledgeList);
