@@ -8,7 +8,7 @@ const path = require('path');
 const { GoogleGenerativeAI, TaskType } = require('@google/generative-ai');
 
 const SIMILARITY_THRESHOLD = 0.5; // [FIX] Giảm ngưỡng để tạo chunk lớn hơn, giàu ngữ cảnh hơn.
-const MAX_TOKENS_PER_CHUNK = 50000; // [FIX] Giảm giới hạn token để chunk không quá dài, tránh làm nhiễu kết quả tìm kiếm.
+const MAX_TOKENS_PER_CHUNK = 5000; // [FIX] Giảm giới hạn token để chunk không quá dài, tránh làm nhiễu kết quả tìm kiếm.
 const OVERLAP_SENTENCES_COUNT = 3; // Số câu chồng lấn giữa các chunk
 /**
  * Tính toán độ tương đồng cosine giữa hai vector.
