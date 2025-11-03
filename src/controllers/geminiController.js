@@ -1,9 +1,9 @@
 const aiService = require('../services/aiService');
 const knowledgeModel = require('../models/knowledgeModel');
+const chatModel = require('../models/chatModel'); // [MỚI] Import chatModel
 const { functionDeclarations, availableTools } = require('../services/aiToolService');
 const { TaskType } = require('@google/generative-ai');
 const { routeQuery } = require('../services/queryRouterService');
-const axios = require('axios');
 
 /**
  * [NEW] Bộ lọc ý định đơn giản để xử lý các câu chào hỏi hoặc câu đơn giản.
@@ -13,29 +13,48 @@ const axios = require('axios');
 function simpleIntentFilter(text) {
     const normalizedText = text.toLowerCase().trim();
     const greetings = ['xin chào', 'chào bạn', 'hello', 'hi'];
-    const thanks = ['cảm ơn', 'thank you', 'thanks'];    
+    const thanks = ['cảm ơn', 'cám ơn', 'thank you', 'thanks']; // [TỐI ƯU] Rút gọn mảng, chỉ cần từ khóa gốc
+
+    // Logic cho lời chào: Phải đứng ở đầu câu
     const isGreetingOnly = greetings.some(g => {
         return normalizedText.startsWith(g) && normalizedText.length < g.length + 5;
     });
+    if (isGreetingOnly) return 'Chào đồng chí, Tôi là Trợ lý ảo Công Hải số (**chatCHS**), tôi được xây dựng và huấn luyện bởi Văn phòng Đảng uỷ xã để phục vụ tốt hơn cho công tác của đồng chí, tôi có thể giúp gì cho bạn?';
 
-    if (isGreetingOnly) return 'Chào đồng chí, Tôi là Trợ lý ảo Công Hải số, tôi được xây dựng và huấn luyện bởi Văn phòng Đảng uỷ xã để phục vụ tốt hơn cho công tác của đồng chí, tôi có thể giúp gì cho bạn?';
-    if (thanks.some(t => normalizedText.startsWith(t) && normalizedText.length < t.length + 5)) return 'Rất vui được giúp bạn!';
+    // [SỬA LỖI] Logic cho lời cảm ơn: Chỉ cần xuất hiện trong câu ngắn
+    const isThankYouOnly = thanks.some(t => normalizedText.includes(t));
+    // Câu được coi là "chỉ cảm ơn" nếu nó chứa từ khóa cảm ơn và có độ dài dưới 25 ký tự.
+    if (isThankYouOnly && normalizedText.length < 25) {
+        return 'Không có gì! Rất vui được hỗ trợ bạn!';
+    }
+
     return null;
 }
 
 const chatWithAI = async (req, res) => {
     try {
-        let { prompt, history = [] } = req.body; 
+        // [THAY ĐỔI] Nhận sessionId (tùy chọn) và prompt. Không còn nhận history.
+        let { prompt, sessionId } = req.body; 
         if (!prompt) {
             return res.status(400).json({ message: 'Prompt is required.' });
         }
 
+        let history = [];
+        // Nếu chưa có sessionId, tạo phiên mới.
+        if (!sessionId) {
+            sessionId = await chatModel.createSession(req.user.user_id, prompt);
+        } else {
+            // Nếu có sessionId, lấy lịch sử từ CSDL để làm ngữ cảnh.
+            history = await chatModel.getHistoryBySessionId(sessionId, req.user.user_id);
+        }
+        // Lưu tin nhắn của người dùng vào CSDL.
+        await chatModel.addMessage(sessionId, 'user', prompt);
+
         // --- Bước 0: Kiểm tra các ý định đơn giản trước ---
         const simpleReply = simpleIntentFilter(prompt);
         if (simpleReply) {
-            history.push({ role: "user", parts: [{ text: prompt }] });
-            history.push({ role: "model", parts: [{ text: simpleReply }] });            
-            return res.status(200).json({ reply: simpleReply, history });
+            await chatModel.addMessage(sessionId, 'model', simpleReply);
+            return res.status(200).json({ reply: simpleReply, sessionId: sessionId });
         } 
         // --- Bước 1: Sử dụng bộ định tuyến để lấy quyết định ---
         const { decision } = await routeQuery(prompt);
@@ -47,8 +66,8 @@ const chatWithAI = async (req, res) => {
             const promptEmbedding = await aiService.generateEmbedding(prompt, TaskType.RETRIEVAL_QUERY);
             const similarChunks = await knowledgeModel.findSimilar(promptEmbedding, 5);
             const context = similarChunks.map(chunk => chunk.content).join('\n\n---\n\n');
-            
-            const systemInstruction = `Bạn là trợ lý ảo đặc biệt của riêng xã Công Hải do Văn phòng Đảng uỷ tạo ra và huấn luyện để phục vụ cho xã Công Hải".
+
+            const systemInstruction = `Bạn là trợ lý ảo chatCHS, một trợ lý đặc biệt của xã Công Hải do Văn phòng Đảng uỷ tạo ra và huấn luyện.
 Hãy phân tích tài liệu tham khảo dưới đây để trả lời câu hỏi của người dùng.
 --- BẮT ĐẦU TÀI LIỆU THAM KHẢO ---
 ${context}
@@ -97,7 +116,7 @@ CHỈ DẪN QUAN TRỌNG:
                         { role: "user", parts: [{ text: prompt }] },
                         { role: "model", parts: functionCalls.map(fc => ({ function_call: fc })) }
                     ],
-                    systemInstruction: `Bạn là trợ lý ảo chuyên nghiệp. Dựa vào kết quả từ các công cụ được cung cấp, hãy trả lời câu hỏi của người dùng. Tuyệt đối không nhắc đến việc bạn có dùng "tài liệu", "công cụ" hay "hàm". Hãy trả lời một cách tự nhiên giống như đây là việc bạn đã biết vể việc đó chính xác. Chỉ trích dẫn nguồn tại liệu khi nào thấy cần thiết nhất.`,
+                    systemInstruction: `Bạn là trợ lý ảo chatCHS. Dựa vào kết quả từ các công cụ được cung cấp, hãy trả lời câu hỏi của người dùng. Tuyệt đối không nhắc đến việc bạn có dùng "tài liệu", "công cụ" hay "hàm". Hãy trả lời một cách tự nhiên giống như đây là việc bạn đã biết vể việc đó chính xác. Chỉ trích dẫn nguồn tại liệu khi nào thấy cần thiết nhất.`,
                     prompt: toolResults.map(tr => tr.part),
                     modelType: 'flash' 
                 };                
@@ -110,10 +129,12 @@ CHỈ DẪN QUAN TRỌNG:
             }
         }
 
-        // --- Bước cuối: Cập nhật lịch sử và trả về kết quả ---
-        history.push({ role: "user", parts: [{ text: prompt }] });
-        history.push({ role: "model", parts: [{ text: finalReply }] });
-        res.status(200).json({ reply: finalReply, history });
+        // [MỚI] Định dạng lại câu trả lời cuối cùng để in đậm tên "chatCHS"
+        const formattedReply = finalReply.replace(/chatCHS/gi, '**chatCHS**');
+
+        // --- Bước cuối: Lưu câu trả lời của AI vào CSDL và trả về kết quả ---
+        await chatModel.addMessage(sessionId, 'model', formattedReply);
+        res.status(200).json({ reply: formattedReply, sessionId: sessionId });
 
     } catch (error) {
         console.error('Error in chatWithAI:', error);

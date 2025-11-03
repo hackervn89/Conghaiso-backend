@@ -142,7 +142,10 @@ Yêu cầu tóm tắt:
       finalSummary = await callGeminiWithRetry(prompt);
     }
 
-    res.json({ summary: finalSummary });
+    // [MỚI] Định dạng lại câu trả lời cuối cùng để in đậm tên "chatCHS"
+    const formattedSummary = finalSummary.replace(/chatCHS/gi, '**chatCHS**');
+
+    res.json({ summary: formattedSummary });
 
   } catch (error) {
     console.error('Lỗi tóm tắt tài liệu:', error);

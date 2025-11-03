@@ -3,7 +3,7 @@ const knowledgeModel = require('../models/knowledgeModel');
 const { normalizeText, checkAnchorKeyword } = require('../config/keywordCache'); // [FIX] Import lại checkAnchorKeyword
 const { TaskType } = require('@google/generative-ai');
 
-const SIMILARITY_THRESHOLD = 0.75; // Ngưỡng tương đồng ngữ nghĩa
+const SIMILARITY_THRESHOLD = 0.7; // Ngưỡng tương đồng ngữ nghĩa
 
 /**
  * Phân tích prompt và quyết định hành động tiếp theo cho AI.
