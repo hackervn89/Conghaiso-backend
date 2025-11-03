@@ -2,6 +2,7 @@ const aiService = require('../services/aiService');
 const knowledgeModel = require('../models/knowledgeModel');
 const { functionDeclarations, availableTools } = require('../services/aiToolService');
 const { TaskType } = require('@google/generative-ai');
+const { routeQuery } = require('../services/queryRouterService');
 const axios = require('axios');
 
 /**
