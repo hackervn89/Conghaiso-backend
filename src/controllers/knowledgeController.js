@@ -32,6 +32,32 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 /**
+ * [NEW] Xác định cấp độ và tiêu đề của một dòng văn bản.
+ * @param {string} line - Dòng văn bản cần kiểm tra.
+ * @returns {{level: number, title: string} | null} - Cấp độ và tiêu đề, hoặc null.
+ */
+function getHeadingInfo(line) {
+    const patterns = [
+        // Cấp 1: PHẦN I, Phần 1, PHẦN THỨ NHẤT
+        { level: 1, regex: /^(PHẦN\s+[A-Z0-9]+|Phần\s+\d+|PHẦN\s+THỨ\s+[A-ZÀ-Ỹ]+)/i },
+        // Cấp 2: Chương I, Chương 1, Mục A, I., II.
+        { level: 2, regex: /^(Chương\s+([IVXLC\d]+)|Mục\s+[A-ZĐÀ-Ỹ]|([IVXLC]+\.))/i },
+        // Cấp 3: 1.1. , 1.2 , Điều 5.
+        { level: 3, regex: /^(Điều\s+\d+\.|(\d+\.){1,}\d*)\s/ },
+        // Cấp 4: a), b.
+        { level: 4, regex: /^\s*[a-z][\.\)]\s+/i },
+        // Cấp 5: - (gạch đầu dòng)
+        { level: 5, regex: /^\s*-\s+/ },
+    ];
+
+    for (const { level, regex } of patterns) {
+        if (regex.test(line)) {
+            return { level, title: line.trim() };
+        }
+    }
+    return null;
+}
+/**
  * Chia một văn bản lớn thành các đoạn nhỏ (chunks).
  * [REFACTOR] Sử dụng thuật toán chia văn bản theo ngữ nghĩa (Semantic Chunking).
  * @param {string} text - Nội dung văn bản.
@@ -70,15 +96,6 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
         return [sentences[0]];
     }
 
-    // 2. [NEW] Xác định các câu là tiêu đề (Structural Chunking)
-    // Regex này tìm các mẫu như: "Chương I:", "Điều 5.", "1.2.", "a)", "Phần thứ nhất"
-    const headingRegex = /^(Chương\s+[IVXLCDM]+[:.]?|Điều\s+\d+[:.]?|Phần\s+\w+[:.]?|\d+(\.\d+)*\.?|[a-z]\))/i;
-    const sentenceHeadings = sentences.map((sentence, index) => ({
-        text: sentence,
-        isHeading: headingRegex.test(sentence.trim()),
-        originalIndex: index
-    }));
-
     // 3. Tạo embedding cho tất cả các câu để chuẩn bị cho semantic split nếu cần.
     const embeddings = await aiService.generateEmbedding(sentences, TaskType.SEMANTIC_SIMILARITY);
 
@@ -91,12 +108,12 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
 
     // 5. [NEW] Logic chia chunk kết hợp cấu trúc và ngữ nghĩa
     const chunks = [];
+    const headingStack = []; // [{level: 1, title: '...'}, {level: 2, title: '...'}]
     let currentChunkSentences = [];
-    let currentHeading = null;
 
     for (let i = 0; i < sentences.length; i++) {
         const sentence = sentences[i];
-        const isHeading = sentenceHeadings.find(h => h.originalIndex === i).isHeading;
+        const headingInfo = getHeadingInfo(sentence);
 
         // Kiểm tra xem có nên ngắt chunk hay không
         let shouldSplit = false;
@@ -107,9 +124,11 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
 
             // Điều kiện ngắt:
             // 1. Gặp một tiêu đề mới.
-            // 2. Ngắt theo ngữ nghĩa (độ tương đồng thấp).
-            // 3. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài).
-            if (isHeading || similarity < SIMILARITY_THRESHOLD || tokensWithNextSentence > MAX_TOKENS_PER_CHUNK) {
+            // 2. Ngắt theo ngữ nghĩa (độ tương đồng thấp) - CHỈ KHI không phải là tiêu đề.
+            // 3. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài) - CHỈ KHI không phải là tiêu đề.
+            if (headingInfo) {
+                shouldSplit = true;
+            } else if (similarity < SIMILARITY_THRESHOLD || tokensWithNextSentence > MAX_TOKENS_PER_CHUNK) {
                 shouldSplit = true;
             }
         }
@@ -118,36 +137,38 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
             // Hoàn thành chunk hiện tại
             if (currentChunkSentences.length > 0) {
                 let chunkContent = currentChunkSentences.join(' ').trim();
-                // [QUAN TRỌNG] Gắn tiêu đề vào đầu chunk nếu có
-                if (currentHeading) {
-                    chunkContent = `Tiêu đề: ${currentHeading}\nNội dung: ${chunkContent}`;
+                // [REFACTOR] Gắn tiêu đề phân cấp vào đầu chunk
+                if (headingStack.length > 0) {
+                    const hierarchicalTitle = headingStack.map(h => h.title).join(' > ');
+                    chunkContent = `Tiêu đề: ${hierarchicalTitle}\nNội dung: ${chunkContent}`;
                 }
                 chunks.push(chunkContent);
             }
 
             // Bắt đầu chunk mới
             const overlap = currentChunkSentences.slice(-OVERLAP_SENTENCES_COUNT);
-            currentChunkSentences = isHeading ? [...overlap] : [...overlap, sentence];
+            currentChunkSentences = headingInfo ? [...overlap] : [...overlap, sentence];
 
         } else {
             currentChunkSentences.push(sentence);
         }
 
-        // Nếu câu hiện tại là một tiêu đề, cập nhật nó cho các chunk tiếp theo
-        if (isHeading) {
-            currentHeading = sentence.trim();
-            // Nếu câu tiêu đề cũng là nội dung, thêm nó vào chunk
-            if (!shouldSplit) {
-                 currentChunkSentences.push(sentence);
+        // [REFACTOR] Cập nhật ngăn xếp tiêu đề nếu câu hiện tại là một tiêu đề
+        if (headingInfo) {
+            // Loại bỏ các tiêu đề có cấp độ lớn hơn hoặc bằng cấp độ hiện tại
+            while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= headingInfo.level) {
+                headingStack.pop();
             }
+            headingStack.push(headingInfo);
         }
     }
 
     // Thêm chunk cuối cùng vào danh sách.
     if (currentChunkSentences.length > 0) {
         let lastChunkContent = currentChunkSentences.join(' ').trim();
-        if (currentHeading) {
-            lastChunkContent = `Tiêu đề: ${currentHeading}\nNội dung: ${lastChunkContent}`;
+        if (headingStack.length > 0) {
+            const hierarchicalTitle = headingStack.map(h => h.title).join(' > ');
+            lastChunkContent = `Tiêu đề: ${hierarchicalTitle}\nNội dung: ${lastChunkContent}`;
         }
         chunks.push(lastChunkContent);
     }
