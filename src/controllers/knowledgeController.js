@@ -7,14 +7,12 @@ const mammoth = require('mammoth');
 const path = require('path');
 const { GoogleGenerativeAI, TaskType } = require('@google/generative-ai');
 
-const SIMILARITY_THRESHOLD = 0.5; // [FIX] Giảm ngưỡng để tạo chunk lớn hơn, giàu ngữ cảnh hơn.
-const MAX_TOKENS_PER_CHUNK = 5000; // [FIX] Giảm giới hạn token để chunk không quá dài, tránh làm nhiễu kết quả tìm kiếm.
-const OVERLAP_SENTENCES_COUNT = 3; // Số câu chồng lấn giữa các chunk
+const SIMILARITY_THRESHOLD = 0.5; 
+const MAX_TOKENS_PER_CHUNK = 4000; // Giới hạn an toàn cho Flash Model
+const OVERLAP_SENTENCES_COUNT = 2; // Giảm overlap để tránh lặp nội dung thừa
+
 /**
  * Tính toán độ tương đồng cosine giữa hai vector.
- * @param {number[]} vecA - Vector A.
- * @param {number[]} vecB - Vector B.
- * @returns {number} - Điểm tương đồng cosine.
  */
 function cosineSimilarity(vecA, vecB) {
     let dotProduct = 0.0;
@@ -32,112 +30,116 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 /**
- * [NEW] Xác định cấp độ và tiêu đề của một dòng văn bản.
- * @param {string} line - Dòng văn bản cần kiểm tra.
- * @returns {{level: number, title: string} | null} - Cấp độ và tiêu đề, hoặc null.
+ * [ĐÃ SỬA CHỮA] Xác định cấp độ tiêu đề theo chiến lược 3 cấp.
+ * Chỉ bắt các tiêu đề lớn (Thôn, La Mã, Số thứ tự).
+ * Bỏ qua các mục nhỏ (-, +, a, b) để gộp vào nội dung.
  */
 function getHeadingInfo(line) {
+    const text = line.trim();
+
     const patterns = [
-        // Cấp 1: PHẦN I, Phần 1, PHẦN THỨ NHẤT
-        { level: 1, regex: /^(PHẦN\s+[A-Z0-9]+|Phần\s+\d+|PHẦN\s+THỨ\s+[A-ZÀ-Ỹ]+)/i },
-        // Cấp 2: Chương I, Chương 1, Mục A, I., II.
-        { level: 2, regex: /^(Chương\s+([IVXLC\d]+)|Mục\s+[A-ZĐÀ-Ỹ]|([IVXLC]+\.))/i },
-        // Cấp 3: 1.1. , 1.2 , Điều 5.
-        { level: 3, regex: /^(Điều\s+\d+\.|(\d+\.){1,}\d*)\s/ },
-        // Cấp 4: a), b.
-        { level: 4, regex: /^\s*[a-z][\.\)]\s+/i },
-        // Cấp 5: - (gạch đầu dòng)
-        { level: 5, regex: /^\s*-\s+/ },
+        // --- CẤP 1 (Root): Tên Thôn / Phần lớn ---
+        // Bắt: "A. THÔN...", "PHẦN I", "CHƯƠNG I"
+        { 
+            level: 1, 
+            regex: /^(PHẦN\s+|CHƯƠNG\s+|[A-Z]\.\s+THÔN|[A-Z]\.\s+)/i 
+        },
+
+        // --- CẤP 2 (Group): Số La Mã (Lĩnh vực lớn) ---
+        // Bắt: "I. Đặc điểm", "II. Tình hình", "Mục A"
+        { 
+            level: 2, 
+            regex: /^(MỤC\s+|[IVXLC]+\.\s+)/i 
+        },
+
+        // --- CẤP 3 (Detail): Số thứ tự (Nội dung chi tiết) ---
+        // Bắt: "1. Vị trí", "2. Dân số", "Điều 1", "1.1."
+        { 
+            level: 3, 
+            regex: /^(ĐIỀU\s+\d+|(\d+\.)+\s+)/i 
+        }
     ];
 
     for (const { level, regex } of patterns) {
-        if (regex.test(line)) {
-            return { level, title: line.trim() };
+        if (regex.test(text)) {
+            return { level, title: text };
         }
     }
+    // Không khớp 3 cấp trên -> Trả về null (Coi là nội dung bình thường để gộp vào chunk trước)
     return null;
 }
+
 /**
- * Chia một văn bản lớn thành các đoạn nhỏ (chunks).
- * [REFACTOR] Sử dụng thuật toán chia văn bản theo ngữ nghĩa (Semantic Chunking).
- * @param {string} text - Nội dung văn bản.
- * @returns {string[]} - Mảng các chunks.
+ * Chia văn bản thành các chunk thông minh dựa trên cấu trúc và ngữ nghĩa.
  */
-async function chunkText(text, modelForTokens) { // Thêm tham số modelForTokens
-    console.log('[Chunking] Starting structural and semantic chunking process...');
+async function chunkText(text, modelForTokens) { 
+    console.log('[Chunking] Bắt đầu quy trình chia nhỏ văn bản (Smart Structural Split)...');
 
-    // 1. [REFACTOR] Tách văn bản thành các câu bằng regex mạnh mẽ hơn.
-    // Regex này tìm các điểm ngắt (split points) giữa các câu, xử lý tốt hơn các trường hợp
-    // như viết tắt (Mr., Dr.), số liệu (1.2.3), và URL.
-    // Nó tìm một khoảng trắng theo sau dấu câu cuối câu, nhưng không phải là dấu chấm trong từ viết tắt hoặc số.
+    // 1. Tách câu, xử lý các ký tự xuống dòng và khoảng trắng
+    // Regex này tách câu dựa trên dấu chấm, hỏi, cảm thán nhưng tránh các từ viết tắt
     const splitRegex = /(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|!)\s+/g;
-    // Thay thế các ký tự xuống dòng bằng khoảng trắng trước khi tách để đảm bảo regex hoạt động đúng.
-    const normalizedText = text.replace(/(\r\n|\n|\r)/gm, " ");
-    const rawSentences = normalizedText.split(splitRegex).filter(s => s.length > 0);
-
-
-    // [FIX] Lọc ra các câu rỗng, chỉ chứa khoảng trắng, hoặc quá ngắn để tránh lỗi 400 từ Google API.
-    // Một câu có ý nghĩa thường có ít nhất 10 ký tự.
-    const MIN_SENTENCE_LENGTH = 10;
-    const sentences = rawSentences.map(s => {
-        // [FIX] Làm sạch chuỗi văn bản một cách triệt để.
-        // 1. Thay thế tất cả các ký tự xuống dòng bằng một khoảng trắng.
-        // 2. Loại bỏ các ký tự điều khiển không in được.
-        // 3. Loại bỏ các khoảng trắng thừa liên tiếp.
-        // 4. Loại bỏ khoảng trắng ở đầu/cuối. (trim() đã được áp dụng trong split)
+    const normalizedText = text.replace(/(\r\n|\n|\r)/gm, " "); 
+    
+    // Lọc bỏ các câu quá ngắn hoặc rỗng
+    const MIN_SENTENCE_LENGTH = 5;
+    const sentences = normalizedText.split(splitRegex).map(s => {
         return s.replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1F\x7F]/g, '').replace(/\s\s+/g, ' ').trim();
-    })
-    .filter(s => s.length >= MIN_SENTENCE_LENGTH);
+    }).filter(s => s.length >= MIN_SENTENCE_LENGTH);
 
-    if (sentences.length === 0) {
-        return [];
+    if (sentences.length === 0) return [];
+    
+    // 2. Tạo embedding ngữ nghĩa để hỗ trợ quyết định cắt (nếu cần)
+    // Lưu ý: Nếu văn bản quá dài, bước này có thể tốn thời gian. 
+    // Với chiến lược Heading-Base mới, ta có thể bỏ qua bước này để tăng tốc nếu muốn, 
+    // nhưng giữ lại để xử lý các đoạn văn xuôi dài không có tiêu đề.
+    let similarities = [];
+    try {
+        const embeddings = await aiService.generateEmbedding(sentences, TaskType.SEMANTIC_SIMILARITY);
+        for (let i = 0; i < embeddings.length - 1; i++) {
+            similarities.push(cosineSimilarity(embeddings[i], embeddings[i + 1]));
+        }
+    } catch (e) {
+        console.warn("[Chunking] Không thể tạo embedding ngữ nghĩa, sẽ chỉ dùng cấu trúc Header.", e.message);
+        // Fallback: giả định tương đồng cao để ưu tiên cắt theo Header
+        similarities = new Array(sentences.length).fill(0.9); 
     }
-    if (sentences.length === 1) {
-        return [sentences[0]];
-    }
 
-    // 3. Tạo embedding cho tất cả các câu để chuẩn bị cho semantic split nếu cần.
-    const embeddings = await aiService.generateEmbedding(sentences, TaskType.SEMANTIC_SIMILARITY);
-
-    // 4. Tính toán độ tương đồng giữa các câu liên tiếp.
-    const similarities = [];
-    for (let i = 0; i < embeddings.length - 1; i++) {
-        const sim = cosineSimilarity(embeddings[i], embeddings[i + 1]);
-        similarities.push(sim);
-    }
-
-    // 5. [NEW] Logic chia chunk kết hợp cấu trúc và ngữ nghĩa
+    // 3. Vòng lặp chia chunk
     const chunks = [];
-    const headingStack = []; // [{level: 1, title: '...'}, {level: 2, title: '...'}]
+    const headingStack = []; // Stack lưu ngữ cảnh: [Thôn A, Kinh tế, Dân số]
     let currentChunkSentences = [];
 
     for (let i = 0; i < sentences.length; i++) {
         const sentence = sentences[i];
         const headingInfo = getHeadingInfo(sentence);
 
-        // Kiểm tra xem có nên ngắt chunk hay không
         let shouldSplit = false;
-        if (i > 0) {
-            const similarity = similarities[i - 1];
-            const potentialChunkContent = [...currentChunkSentences, sentence].join(' ');
-            const { totalTokens: tokensWithNextSentence } = await modelForTokens.countTokens(potentialChunkContent);
 
-            // Điều kiện ngắt:
-            // 1. Gặp một tiêu đề mới.
-            // 2. Ngắt theo ngữ nghĩa (độ tương đồng thấp) - CHỈ KHI không phải là tiêu đề.
-            // 3. Ngắt theo kích thước (chunk hiện tại + câu tiếp theo sẽ quá dài) - CHỈ KHI không phải là tiêu đề.
+        // --- LOGIC QUYẾT ĐỊNH CẮT (CORE LOGIC) ---
+        if (i > 0) {
+            const similarity = similarities[i - 1] || 0.5;
+            const potentialChunkContent = [...currentChunkSentences, sentence].join(' ');
+            // Đếm token ước lượng (nhanh hơn gọi API) hoặc gọi API nếu cần chính xác tuyệt đối
+            // Ở đây gọi API đếm token vì đã truyền model vào
+            const { totalTokens } = await modelForTokens.countTokens(potentialChunkContent);
+
             if (headingInfo) {
+                // ƯU TIÊN 1: Gặp tiêu đề xịn (Cấp 1, 2, 3) -> CẮT NGAY
                 shouldSplit = true;
-            } else if (similarity < SIMILARITY_THRESHOLD || tokensWithNextSentence > MAX_TOKENS_PER_CHUNK) {
+            } else if (totalTokens > MAX_TOKENS_PER_CHUNK) {
+                // ƯU TIÊN 2: Quá dài -> CẮT
+                shouldSplit = true;
+            } else if (similarity < SIMILARITY_THRESHOLD && currentChunkSentences.length > 5) {
+                // ƯU TIÊN 3: Khác biệt ngữ nghĩa và chunk đã đủ dài -> CẮT
                 shouldSplit = true;
             }
         }
 
         if (shouldSplit) {
-            // Hoàn thành chunk hiện tại
+            // Lưu chunk cũ
             if (currentChunkSentences.length > 0) {
                 let chunkContent = currentChunkSentences.join(' ').trim();
-                // [REFACTOR] Gắn tiêu đề phân cấp vào đầu chunk
+                // Gắn ngữ cảnh từ Stack (Context Injection)
                 if (headingStack.length > 0) {
                     const hierarchicalTitle = headingStack.map(h => h.title).join(' > ');
                     chunkContent = `Tiêu đề: ${hierarchicalTitle}\nNội dung: ${chunkContent}`;
@@ -145,17 +147,18 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
                 chunks.push(chunkContent);
             }
 
-            // Bắt đầu chunk mới
+            // Reset cho chunk mới (có overlap nhẹ để liền mạch)
             const overlap = currentChunkSentences.slice(-OVERLAP_SENTENCES_COUNT);
-            currentChunkSentences = headingInfo ? [...overlap] : [...overlap, sentence];
-
+            // Nếu là heading mới thì không cần overlap với nội dung cũ, bắt đầu mới luôn
+            currentChunkSentences = headingInfo ? [sentence] : [...overlap, sentence];
         } else {
             currentChunkSentences.push(sentence);
         }
 
-        // [REFACTOR] Cập nhật ngăn xếp tiêu đề nếu câu hiện tại là một tiêu đề
+        // --- CẬP NHẬT STACK TIÊU ĐỀ ---
         if (headingInfo) {
-            // Loại bỏ các tiêu đề có cấp độ lớn hơn hoặc bằng cấp độ hiện tại
+            // Nếu gặp cấp nhỏ hơn hoặc bằng cấp hiện tại trong stack -> Pop ra
+            // Ví dụ: Đang ở [I. Kinh tế], gặp [II. Văn hóa] -> Pop [I. Kinh tế] ra, Push [II. Văn hóa] vào
             while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= headingInfo.level) {
                 headingStack.pop();
             }
@@ -163,7 +166,7 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
         }
     }
 
-    // Thêm chunk cuối cùng vào danh sách.
+    // Lưu chunk cuối cùng
     if (currentChunkSentences.length > 0) {
         let lastChunkContent = currentChunkSentences.join(' ').trim();
         if (headingStack.length > 0) {
@@ -173,28 +176,20 @@ async function chunkText(text, modelForTokens) { // Thêm tham số modelForToke
         chunks.push(lastChunkContent);
     }
 
-    // LỌC BỎ các chunk rỗng hoặc chỉ chứa khoảng trắng
-    const validChunks = chunks.map(chunk => chunk.trim()).filter(chunk => chunk.length > 0);
-
-    return validChunks;
+    return chunks.map(c => c.trim()).filter(c => c.length > 0);
 }
 
 const createKnowledge = async (req, res) => {
-    // Khởi tạo Gemini AI để đếm token
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" }); // [TỐI ƯU] Dùng Flash-Lite để đếm token
+    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+    
     try {
-        // Thay vì 'content', chúng ta nhận 'tempFilePath' từ frontend
         const { category, tempFilePath } = req.body;
-        if (!tempFilePath) {
-            return res.status(400).json({ message: 'tempFilePath is required.' });
-        }
+        if (!tempFilePath) return res.status(400).json({ message: 'tempFilePath is required.' });
 
-        // 1. Di chuyển file từ thư mục tạm sang thư mục knowledge
         const { finalPath, originalName } = await storageService.moveFileToKnowledgeFolder(tempFilePath);
-
-        // 2. Đọc nội dung từ file đã lưu
         const absoluteFilePath = path.join(storageService.STORAGE_BASE_PATH, finalPath);
+        
         let fileContent = '';
         const fileExtension = path.extname(originalName).toLowerCase();
 
@@ -208,79 +203,58 @@ const createKnowledge = async (req, res) => {
         } else if (fileExtension === '.txt') {
             fileContent = await fs.readFile(absoluteFilePath, 'utf-8');
         } else {
-            return res.status(400).json({ message: `Unsupported file type: ${fileExtension}. Please upload .txt, .docx, or .pdf files.` });
+            return res.status(400).json({ message: 'Unsupported file type.' });
         }
 
-        // 3. Chia nhỏ (chunking) nội dung file
-        const chunks = await chunkText(fileContent, modelForTokens); // Truyền modelForTokens vào hàm chunkText
-        if (chunks.length === 0) {
-            return res.status(400).json({ message: 'File content is too short or not formatted correctly to be chunked.' });
-        }
+        // Gọi hàm chunkText mới
+        const chunks = await chunkText(fileContent, modelForTokens);
+        
+        if (chunks.length === 0) return res.status(400).json({ message: 'No content extracted.' });
 
-        // 4. [REFACTOR] Tạo embedding cho TẤT CẢ các chunk trong một lần gọi API duy nhất
-        // Điều này tận dụng logic batching trong aiService, tránh lỗi payload size và tăng hiệu suất.
-        console.log(`[Knowledge] Generating embeddings for ${chunks.length} chunks in a single batch call...`);
-        // [FIX] Loại bỏ ký tự NULL (\x00) khỏi tất cả các chunk trước khi tạo embedding
+        console.log(`[Knowledge] Creating embeddings for ${chunks.length} chunks...`);
         const sanitizedChunks = chunks.map(chunk => chunk.replace(/\x00/g, ''));
         const embeddings = await aiService.generateEmbedding(sanitizedChunks, TaskType.RETRIEVAL_DOCUMENT);
 
-        if (embeddings.length !== sanitizedChunks.length) {
-            throw new Error('Mismatch between number of chunks and generated embeddings.');
-        }
-
-        // 5. Lặp qua các chunk và embedding đã tạo, sau đó lưu vào CSDL
         const ingestedChunks = [];
         for (let i = 0; i < sanitizedChunks.length; i++) {
-            const chunkContent = sanitizedChunks[i];
-            const chunkEmbedding = embeddings[i];
-            
             const newKnowledge = await knowledgeModel.create({
-                content: chunkContent,
+                content: sanitizedChunks[i],
                 category: category || 'Uncategorized',
-                source_document: originalName, // Dùng tên file gốc làm nguồn
-                embedding: chunkEmbedding
+                source_document: originalName,
+                embedding: embeddings[i]
             });
             ingestedChunks.push(newKnowledge);
         }
 
-        res.status(201).json({ message: `Successfully ingested ${ingestedChunks.length} knowledge chunks from ${originalName}.`, chunks: ingestedChunks });
+        res.status(201).json({ message: `Ingested ${ingestedChunks.length} chunks.`, chunks: ingestedChunks });
     } catch (error) {
         console.error('Error creating knowledge:', error);
-        res.status(500).json({ message: 'Server error while creating knowledge.' });
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 
 const updateKnowledge = async (req, res) => {
     try {
         const { id } = req.params;
-        // Việc cập nhật sẽ chỉ cho phép sửa nội dung text của một chunk, không upload lại file
         const { content, category, source_document } = req.body; 
-        if (!content) {
-            return res.status(400).json({ message: 'Content is required.' });
-        }
+        if (!content) return res.status(400).json({ message: 'Content required.' });
 
         const embedding = await aiService.generateEmbedding(content, TaskType.RETRIEVAL_DOCUMENT);
-        const updatedKnowledge = await knowledgeModel.update(id, { content, category, source_document, embedding });
+        const updated = await knowledgeModel.update(id, { content, category, source_document, embedding });
 
-        if (!updatedKnowledge) {
-            return res.status(404).json({ message: 'Knowledge not found.' });
-        }
-
-        res.status(200).json(updatedKnowledge);
+        if (!updated) return res.status(404).json({ message: 'Not found.' });
+        res.status(200).json(updated);
     } catch (error) {
-        console.error('Error updating knowledge:', error);
-        res.status(500).json({ message: 'Server error while updating knowledge.' });
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 
 const deleteKnowledge = async (req, res) => {
     try {
-        const { id } = req.params;
-        await knowledgeModel.remove(id);
-        res.status(200).json({ message: 'Knowledge chunk deleted' });
+        await knowledgeModel.remove(req.params.id);
+        res.status(200).json({ message: 'Deleted.' });
     } catch (error) {
-        console.error('Error deleting knowledge:', error);
-        res.status(500).json({ message: 'Server error while deleting knowledge.' });
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 
@@ -291,52 +265,43 @@ const getKnowledgeList = async (req, res) => {
         const result = await knowledgeModel.findAll(page, limit);
         res.status(200).json(result);
     } catch (error) {
-        console.error('Error fetching knowledge list:', error);
-        res.status(500).json({ message: 'Server error while fetching knowledge list.' });
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 
 const getKnowledgeById = async (req, res) => {
     try {
-        const { id } = req.params;
-        const knowledge = await knowledgeModel.findById(id);
-        if (!knowledge) {
-            return res.status(404).json({ message: 'Knowledge not found.' });
-        }
+        const knowledge = await knowledgeModel.findById(req.params.id);
+        if (!knowledge) return res.status(404).json({ message: 'Not found.' });
         res.status(200).json(knowledge);
     } catch (error) {
-        console.error('Error fetching knowledge by ID:', error);
-        res.status(500).json({ message: 'Server error while fetching knowledge.' });
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 
-/**
- * [NEW] Tạo tri thức từ các đoạn văn bản (chunks) được cung cấp sẵn.
- * Hữu ích khi người dùng muốn tự chia nhỏ tài liệu theo cách thủ công.
- * @param {object} req - Request object. Body chứa { chunks: string[], category: string, source_document: string }.
- * @param {object} res - Response object.
- */
 const createKnowledgeFromText = async (req, res) => {
+    // Để cho an toàn, ta vẫn dùng model để đếm token nếu cần thiết
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+
     try {
-        const { chunks, category, source_document } = req.body;
+        let { text, chunks, category, source_document } = req.body;
+
+        // [TÍNH NĂNG MỚI] Nếu người dùng gửi text thô, tự động chunking thông minh
+        if (text && (!chunks || chunks.length === 0)) {
+             console.log('[Manual Input] Đang chia nhỏ văn bản thủ công bằng AI Logic...');
+             chunks = await chunkText(text, modelForTokens);
+        }
 
         if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
-            return res.status(400).json({ message: '`chunks` phải là một mảng các đoạn văn bản và không được rỗng.' });
+            return res.status(400).json({ message: 'Dữ liệu không hợp lệ.' });
         }
-        if (!source_document) {
-            return res.status(400).json({ message: '`source_document` là bắt buộc để biết nguồn gốc của tri thức.' });
-        }
+        if (!source_document) return res.status(400).json({ message: 'source_document required.' });
 
-        // 1. Tạo embedding cho tất cả các chunk trong một lần gọi
-        console.log(`[Knowledge From Text] Generating embeddings for ${chunks.length} pre-defined chunks...`);
-        const sanitizedChunks = chunks.map(chunk => chunk.replace(/\x00/g, '').trim()).filter(chunk => chunk.length > 0);
+        console.log(`[From Text] Embedding ${chunks.length} chunks...`);
+        const sanitizedChunks = chunks.map(c => c.replace(/\x00/g, '').trim()).filter(c => c.length > 0);
         const embeddings = await aiService.generateEmbedding(sanitizedChunks, TaskType.RETRIEVAL_DOCUMENT);
 
-        if (embeddings.length !== sanitizedChunks.length) {
-            throw new Error('Mismatch between number of chunks and generated embeddings.');
-        }
-
-        // 2. Lặp và lưu vào CSDL
         const ingestedChunks = [];
         for (let i = 0; i < sanitizedChunks.length; i++) {
             const newKnowledge = await knowledgeModel.create({
@@ -348,10 +313,10 @@ const createKnowledgeFromText = async (req, res) => {
             ingestedChunks.push(newKnowledge);
         }
 
-        res.status(201).json({ message: `Successfully ingested ${ingestedChunks.length} knowledge chunks from manual text input for ${source_document}.`, chunks: ingestedChunks });
+        res.status(201).json({ message: `Ingested ${ingestedChunks.length} chunks from text.`, chunks: ingestedChunks });
     } catch (error) {
-        console.error('Error creating knowledge from text:', error);
-        res.status(500).json({ message: 'Server error while creating knowledge from text.' });
+        console.error('Error:', error);
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 

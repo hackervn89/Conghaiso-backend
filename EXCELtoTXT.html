@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Công Cụ Chuyển Đổi Dữ Liệu Huấn Luyện AI - ChatCHS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Thư viện SheetJS để đọc Excel/CSV mạnh mẽ hơn -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .drag-active { border-color: #2563eb; background-color: #eff6ff; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-5xl">
+        <div class="text-center mb-8 border-b pb-4">
+            <h1 class="text-3xl font-bold text-blue-700 mb-2">Công Cụ Chuyển Đổi Dữ Liệu AI</h1>
+            <p class="text-gray-600">Dành cho hệ thống Công Hải Số (ChatCHS)</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Cột trái: Nhập liệu & Cấu hình -->
+            <div class="space-y-6">
+                <!-- Khu vực kéo thả file -->
+                <div class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center transition-all duration-300 cursor-pointer relative group hover:border-blue-400" id="dropZone">
+                    <input type="file" id="fileInput" accept=".csv, .xls, .xlsx" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                    
+                    <div class="space-y-3 pointer-events-none">
+                        <i class="fas fa-cloud-upload-alt text-5xl text-gray-400 group-hover:text-blue-500 transition-colors"></i>
+                        <h3 class="text-lg font-semibold text-gray-700">Kéo thả file Excel/CSV vào đây</h3>
+                        <p class="text-sm text-gray-500">hoặc nhấn để chọn file từ máy tính</p>
+                    </div>
+                    
+                    <div id="fileInfo" class="hidden mt-4 bg-green-50 text-green-700 px-4 py-2 rounded-lg text-sm font-medium items-center justify-center gap-2">
+                        <i class="fas fa-check-circle"></i> <span id="fileName">...</span>
+                    </div>
+                </div>
+
+                <!-- Nút thao tác -->
+                <div class="flex gap-3">
+                    <button onclick="processFile()" id="convertBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2" disabled>
+                        <i class="fas fa-magic"></i> Chuyển Đổi Ngay
+                    </button>
+                    <button onclick="resetApp()" class="px-4 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition" title="Làm mới">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                </div>
+
+                <!-- Hướng dẫn nhanh -->
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg text-sm text-blue-800">
+                    <h4 class="font-bold mb-1"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i> Mẹo:</h4>
+                    <p>Công cụ tự động dịch: <strong>01-CV/ĐU</strong> &rarr; <em>Công văn của Đảng ủy xã</em>.</p>
+                    <p class="mt-1">Hỗ trợ tốt nhất cho file CSV có cột: <strong>Số ký hiệu, Ngày ký, Trích yếu</strong>.</p>
+                </div>
+            </div>
+
+            <!-- Cột phải: Kết quả & Tải xuống -->
+            <div class="flex flex-col h-full space-y-4">
+                <div class="flex justify-between items-end">
+                    <label class="font-bold text-gray-700 flex items-center gap-2">
+                        <i class="fas fa-code text-blue-500"></i> Kết quả xem trước
+                    </label>
+                    <span id="statsBadge" class="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full hidden">0 dòng</span>
+                </div>
+
+                <div class="relative flex-grow">
+                    <textarea id="outputPreview" class="w-full h-full min-h-[300px] p-4 border border-gray-300 rounded-xl font-mono text-sm leading-relaxed resize-none focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50 text-gray-700" readonly placeholder="Kết quả chuyển đổi sẽ hiển thị tại đây..."></textarea>
+                    
+                    <!-- Nút copy nhanh -->
+                    <button onclick="copyToClipboard()" id="copyBtn" class="absolute top-2 right-2 bg-white border hover:bg-gray-100 text-gray-600 p-2 rounded shadow-sm hidden" title="Sao chép">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+                
+                <button onclick="downloadResult()" id="downloadBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition hidden flex items-center justify-center gap-2">
+                    <i class="fas fa-download"></i> Tải File .txt Huấn Luyện AI
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- TỪ ĐIỂN DỮ LIỆU ---
+        const TYPE_MAPPING = {
+            'CV': 'Công văn', 'BC': 'Báo cáo', 'KH': 'Kế hoạch', 'QĐ': 'Quyết định',
+            'TB': 'Thông báo', 'TTr': 'Tờ trình', 'GM': 'Giấy mời', 'CTr': 'Chương trình',
+            'HD': 'Hướng dẫn', 'NQ': 'Nghị quyết', 'QC': 'Quy chế', 'QĐi': 'Quy định',
+            'KL': 'Kết luận', 'ĐA': 'Đề án', 'BS': 'Bản sao', 'SL': 'Sao lục',
+            'DS': 'Danh sách', 'PA': 'Phương án'
+        };
+
+        const ORG_MAPPING = {
+            'ĐU': 'Đảng ủy xã', 'VPĐU': 'Văn phòng Đảng ủy',
+            'UBKT': 'Ủy ban Kiểm tra Đảng ủy', 'UBKTĐU': 'Ủy ban Kiểm tra Đảng ủy',
+            'MTTQ': 'Mặt trận Tổ quốc xã', 'MTTQ-BTT': 'Ban Thường trực Mặt trận Tổ quốc xã',
+            'ĐTN': 'Đoàn Thanh niên xã', 'HND': 'Hội Nông dân xã', 'HNDX': 'Hội Nông dân xã',
+            'CCB': 'Hội Cựu chiến binh xã', 'LHPN': 'Hội Liên hiệp Phụ nữ xã',
+            'BCĐ': 'Ban Chỉ đạo', 'BXDĐ': 'Ban Xây dựng Đảng', 'BTV': 'Ban Thường vụ'
+        };
+
+        // Biến toàn cục
+        let processedContent = "";
+        let selectedFile = null;
+
+        // --- XỬ LÝ SỰ KIỆN GIAO DIỆN ---
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const convertBtn = document.getElementById('convertBtn');
+        const fileNameDisplay = document.getElementById('fileName');
+        const fileInfo = document.getElementById('fileInfo');
+        const outputPreview = document.getElementById('outputPreview');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const statsBadge = document.getElementById('statsBadge');
+
+        // Kéo thả hiệu ứng
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-active');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-active'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-active');
+            if (e.dataTransfer.files.length) handleFileSelect(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) handleFileSelect(e.target.files[0]);
+        });
+
+        function handleFileSelect(file) {
+            selectedFile = file;
+            fileNameDisplay.textContent = file.name;
+            fileInfo.classList.remove('hidden');
+            fileInfo.classList.add('flex');
+            convertBtn.disabled = false;
+            convertBtn.classList.add('animate-pulse'); // Hiệu ứng nhắc nhở bấm
+        }
+
+        function resetApp() {
+            selectedFile = null;
+            fileInput.value = '';
+            outputPreview.value = '';
+            fileInfo.classList.add('hidden');
+            fileInfo.classList.remove('flex');
+            convertBtn.disabled = true;
+            convertBtn.classList.remove('animate-pulse');
+            downloadBtn.classList.add('hidden');
+            copyBtn.classList.add('hidden');
+            statsBadge.classList.add('hidden');
+        }
+
+        // --- LOGIC XỬ LÝ CHÍNH ---
+
+        function excelDateToJSDate(serial) {
+            if (!serial || isNaN(serial)) return null;
+            // Excel date bug: Excel coi năm 1900 là năm nhuận, JS thì không.
+            // Nếu serial > 60 (sau 28/2/1900), trừ đi 1 ngày nếu tính chính xác tuyệt đối từ mốc 1900.
+            // Tuy nhiên, công thức phổ thông thường dùng:
+            const utc_days  = Math.floor(serial - 25569);
+            const utc_value = utc_days * 86400;                                      
+            const date_info = new Date(utc_value * 1000);
+            
+            const day = date_info.getDate().toString().padStart(2, '0');
+            const month = (date_info.getMonth() + 1).toString().padStart(2, '0');
+            const year = date_info.getFullYear();
+            
+            // Validate sơ bộ năm (tránh ra năm 1900 do lỗi serial 0 hoặc null)
+            if (year < 2000) return null; 
+
+            return `${day}/${month}/${year}`;
+        }
+
+        function interpretSymbol(symbol) {
+            if (!symbol) return "Văn bản";
+            // 1. Làm sạch: bỏ khoảng trắng, dấu ngoặc kép thừa
+            symbol = symbol.trim().replace(/^"|"$/g, '');
+
+            // 2. Tách số và phần chữ (VD: 209-CV/ĐU -> [209, CV/ĐU])
+            // Tìm dấu gạch ngang đầu tiên làm mốc tách
+            const firstDashIndex = symbol.indexOf('-');
+            if (firstDashIndex === -1) {
+                // Thử xử lý trường hợp đặc biệt như: 11/VBĐI... (dùng dấu / thay vì -)
+                // Hoặc trả về nguyên văn nếu không phân tích được
+                return `Văn bản ký hiệu ${symbol} của Đảng ủy xã`; 
+            }
+
+            // Phần ký tự loại văn bản (bỏ phần số phía trước)
+            const textPart = symbol.substring(firstDashIndex + 1); // VD: CV/ĐU hoặc KH-BTV
+            
+            // 3. Tách Loại và Đơn vị (VD: CV / ĐU)
+            // Ưu tiên tách bằng dấu '/'
+            let splitChar = textPart.includes('/') ? '/' : '-';
+            let [typeCode, orgCodeRaw] = textPart.split(splitChar);
+
+            // Làm sạch code (chỉ giữ chữ cái)
+            typeCode = typeCode ? typeCode.trim().toUpperCase().replace(/[^A-ZĐƯĂÂÔƠÊÁÀẢÃẠÍÌỈĨỊÝỲỶỸỴ]/g, '') : '';
+            let orgCode = orgCodeRaw ? orgCodeRaw.trim().toUpperCase() : '';
+
+            // 4. Dịch nghĩa
+            // 4a. Dịch loại văn bản
+            let typeText = TYPE_MAPPING[typeCode] || 'Văn bản';
+
+            // 4b. Xử lý trường hợp Đơn vị nằm ở vị trí type (lỗi nhập liệu hoặc format lạ: 32-CV/VPĐU)
+            if (!orgCode && ORG_MAPPING[typeCode]) {
+                typeText = "Văn bản";
+                orgCode = typeCode;
+            }
+
+            // 4c. Dịch đơn vị
+            let orgText = "";
+            if (orgCode && ORG_MAPPING[orgCode]) {
+                orgText = `của ${ORG_MAPPING[orgCode]}`;
+            } else if (orgCode) {
+                // Nếu mã đơn vị không có trong từ điển, thử đoán
+                orgText = `của ${orgCode}`;
+            } else {
+                // Mặc định nếu không có mã đơn vị
+                // Một số loại văn bản mặc định là của Đảng ủy nếu không ghi rõ
+                if (['NQ', 'CTr', 'KH', 'BC'].includes(typeCode)) {
+                    orgText = "của Đảng ủy xã";
+                } else {
+                    orgText = "của Đảng ủy xã"; 
+                }
+            }
+
+            return `${typeText} ${orgText}`;
+        }
+
+        async function processFile() {
+            if (!selectedFile) return;
+
+            convertBtn.disabled = true;
+            convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang xử lý...';
+
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                // Dùng thư viện XLSX để đọc cả Excel và CSV chuẩn xác hơn
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // Chuyển sheet thành mảng JSON (mảng các dòng)
+                // header: 1 để lấy dạng mảng mảng (array of arrays) thay vì object
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+                const outputLines = [];
+                let count = 0;
+
+                // Bắt đầu quét từ dòng dữ liệu (bỏ qua header)
+                // Giả định dòng tiêu đề là dòng có chứa chữ "SỐ KÝ HIỆU" hoặc dòng 2 (index 1)
+                let startRowIndex = 0;
+                for(let i=0; i< Math.min(jsonData.length, 10); i++) {
+                    const rowStr = JSON.stringify(jsonData[i]).toUpperCase();
+                    if (rowStr.includes("SỐ KÝ HIỆU") || rowStr.includes("TRÍCH YẾU")) {
+                        startRowIndex = i + 1; // Bắt đầu từ dòng ngay sau tiêu đề
+                        break;
+                    }
+                }
+                if (startRowIndex === 0 && jsonData.length > 2) startRowIndex = 2; // Fallback
+
+                for (let i = startRowIndex; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    // row là mảng các cột. Cần xác định vị trí cột.
+                    // Dựa trên file CSV: [STT, SỐ KÝ HIỆU, NGÀY KÝ, TRÍCH YẾU]
+                    // Index tương ứng:   0    1            2        3
+                    
+                    if (row.length < 2) continue; // Bỏ dòng trống
+
+                    let soKyHieu = row[1] ? String(row[1]).trim() : "";
+                    let ngayKyRaw = row[2];
+                    let trichYeu = row[3] ? String(row[3]).trim() : "";
+
+                    // Nếu thiếu số ký hiệu, bỏ qua
+                    if (!soKyHieu) continue;
+
+                    // Xử lý ngày ký
+                    let ngayKyStr = "không rõ ngày";
+                    if (typeof ngayKyRaw === 'number') {
+                        const date = excelDateToJSDate(ngayKyRaw);
+                        if (date) ngayKyStr = date;
+                    } else if (typeof ngayKyRaw === 'string') {
+                        // Nếu ngày là chuỗi text (VD: "26/11/2025")
+                        if (ngayKyRaw.match(/\d{1,2}\/\d{1,2}\/\d{4}/)) {
+                            ngayKyStr = ngayKyRaw;
+                        }
+                    }
+
+                    // Dịch nghĩa số ký hiệu
+                    const moTaLoaiVanBan = interpretSymbol(soKyHieu);
+
+                    // Tạo câu hoàn chỉnh
+                    const sentence = `${soKyHieu} là ${moTaLoaiVanBan}, ban hành ngày ${ngayKyStr}. Nội dung chi tiết: ${trichYeu}`;
+                    outputLines.push(sentence);
+                    count++;
+                }
+
+                processedContent = outputLines.join('\n');
+                
+                // Update UI
+                outputPreview.value = processedContent;
+                statsBadge.textContent = `${count} dòng văn bản`;
+                statsBadge.classList.remove('hidden');
+                downloadBtn.classList.remove('hidden');
+                copyBtn.classList.remove('hidden');
+                
+                convertBtn.innerHTML = '<i class="fas fa-check"></i> Hoàn Thành';
+                setTimeout(() => {
+                    convertBtn.innerHTML = '<i class="fas fa-magic"></i> Chuyển Đổi Lại';
+                    convertBtn.disabled = false;
+                    convertBtn.classList.remove('animate-pulse');
+                }, 2000);
+            };
+
+            reader.readAsArrayBuffer(selectedFile);
+        }
+
+        function downloadResult() {
+            const blob = new Blob([processedContent], { type: 'text/plain;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'du_lieu_huan_luyen_ai_chatchs.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+        function copyToClipboard() {
+            outputPreview.select();
+            document.execCommand('copy');
+            
+            // Hiệu ứng nút copy
+            const originalIcon = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<i class="fas fa-check text-green-500"></i>';
+            setTimeout(() => {
+                copyBtn.innerHTML = originalIcon;
+            }, 1500);
+        }
+    </script>
+</body>
+</html>
