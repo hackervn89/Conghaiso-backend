@@ -7,13 +7,13 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // [UPDATE] Sử dụng Flash-8B: Phiên bản nhỏ nhất, nhanh nhất, tiết kiệm quota nhất.
 // Dùng cho: Phân loại câu hỏi (Router), tóm tắt ngắn, tách từ khóa.
 const flashLiteModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash-8b", 
+    model: "gemini-2.5-pro-1p-freebie", 
 });
 
 // [UPDATE] Sử dụng Flash 1.5 Stable: Phiên bản ổn định, hạn mức miễn phí cao (1500 req/ngày).
 // Dùng cho: Trả lời câu hỏi (RAG), suy luận, tổng hợp thông tin.
 const flashModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-pro-1p-freebie",
     tools: [{ "google_search": {} }], // Bật Google Search
 });
 
@@ -82,7 +82,7 @@ const generateChatResponse = async ({ systemInstruction, history = [], prompt, t
     // flash-lite -> gemini-1.5-flash-8b (Nhanh, Rẻ)
     // flash -> gemini-1.5-flash (Thông minh, Ổn định)
     const chatModel = modelType === 'flash-lite' ? flashLiteModel : flashModel;
-    const modelName = modelType === 'flash-lite' ? 'gemini-1.5-flash-8b' : 'gemini-1.5-flash';
+    const modelName = modelType === 'flash-lite' ? 'gemini-2.5-pro-1p-freebie' : 'gemini-2.5-pro-1p-freebie';
 
     const execute = async (retriesLeft, delay) => {
         try {
