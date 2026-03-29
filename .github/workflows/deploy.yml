@@ -1,36 +1,28 @@
 name: Deploy Backend to Server
 
 on:
-  # Kích hoạt khi có code được đẩy lên nhánh main
   push:
     branches:
       - main
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted # 👈 Chuyển từ ubuntu-latest sang self-hosted
 
     steps:
-      - name: Deploy to Server via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
-          script: |
-            echo "🚀 Bắt đầu triển khai Backend..."
-            cd /home/hoangvietadmin/conghaiso/Conghaiso-backend
-            
-            echo "🔄 Kéo code mới nhất từ nhánh main..."
-            git fetch --all
-            git reset --hard origin/main
+      - name: Deploy Backend trực tiếp trên server
+        run: |
+          echo "🚀 Bắt đầu triển khai Backend..."
+          cd /home/hoangvietadmin/conghaiso/Conghaiso-backend
+          
+          echo "🔄 Kéo code mới nhất từ nhánh main..."
+          git fetch --all
+          git reset --hard origin/main
 
-            echo "📦 Cài đặt các thư viện cần thiết..."
-            npm install --production
+          echo "📦 Cài đặt các thư viện cần thiết..."
+          npm install --production
 
-            echo "🔄 Khởi động lại ứng dụng backend với PM2..."
-            # [FIX] Sử dụng file ecosystem để đảm bảo biến môi trường được áp dụng đúng
-            # 'reload' sẽ cập nhật ứng dụng mà không có thời gian chết (zero-downtime)
-            pm2 reload ecosystem.config.js --env production
-            
-            echo "✅ Triển khai Backend thành công!"
+          echo "🔄 Khởi động lại ứng dụng backend với PM2..."
+          pm2 reload ecosystem.config.js --env production
+          
+          echo "✅ Triển khai Backend thành công!"
