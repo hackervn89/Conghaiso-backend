@@ -1,6 +1,7 @@
 const dotenv = require('dotenv');
 dotenv.config();
 const jwt = require('jsonwebtoken'); // Thêm JWT
+const path = require('path');
 
 const http = require('http');
 const { Server } = require("socket.io");
@@ -66,6 +67,11 @@ const corsOptions = {
 
 // Áp dụng CORS cho Express API (phải đặt SAU middleware debug)
 app.use(cors(corsOptions));
+
+// Yêu cầu 2: Mở quyền truy cập file (Public Static Folder)
+// Cảnh báo: Điều này sẽ cho phép truy cập công khai vào tất cả các tệp trong thư mục uploads.
+// Bất kỳ logic xác thực nào trong fileController sẽ bị bỏ qua đối với các yêu cầu trực tiếp đến URL tệp.
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use(express.json());
 

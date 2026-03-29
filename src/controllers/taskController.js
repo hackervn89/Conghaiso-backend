@@ -5,6 +5,22 @@ const db = require('../config/database'); // Import db để truy vấn
 const { CustomError } = require('../models/errors');
 const storageService = require('../services/storageService'); // Import storageService
 
+/**
+ * Helper function to transform relative file paths to full URLs.
+ * @param {object} task - The task object.
+ * @returns {object} The task object with full URLs for documents.
+ */
+const mapTaskDocUrls = (task) => {
+    if (task && task.documents && Array.isArray(task.documents)) {
+        task.documents = task.documents.map(doc => ({
+            ...doc,
+            // Yêu cầu 4: Trả về Full URL
+            filePath: doc.filePath ? `${process.env.BASE_URL}/uploads/${doc.filePath}` : null
+        }));
+    }
+    return task;
+};
+
 // Helper function to check permissions for modification/deletion
 const canManageTask = (task, user) => {
     if (!task) return false;
@@ -76,7 +92,7 @@ const createTask = async (req, res) => {
         // Sau khi xử lý file, lấy lại thông tin đầy đủ của công việc để trả về
         // Điều này đảm bảo frontend nhận được cả thông tin tài liệu mới
         const finalTask = await taskModel.findById(initialTask.task_id);
-        res.status(201).json(finalTask);
+        res.status(201).json(mapTaskDocUrls(finalTask));
     } catch (error) {
         if (error instanceof CustomError) {
             console.warn(`[Task Create] Lỗi nghiệp vụ: ${error.message}`);
@@ -97,7 +113,11 @@ const getTasks = async (req, res) => {
         // Truyền các tham số filter và phân trang xuống model
         const result = await taskModel.findAll(req.user, { ...req.query, page, limit });
 
-        res.status(200).json(result);
+        // Yêu cầu 4: Trả về Full URL cho mỗi công việc trong danh sách
+        const tasksWithUrls = result.tasks.map(mapTaskDocUrls);
+
+        res.status(200).json({ ...result, tasks: tasksWithUrls });
+
     } catch (error) {
         if (error instanceof CustomError) {
             console.warn(`[Task List] Lỗi nghiệp vụ: ${error.message}`);
@@ -114,7 +134,7 @@ const getTaskById = async (req, res) => {
         if (!task) {
             throw new CustomError("Không tìm thấy công việc.", 404);
         }
-        res.status(200).json(task);
+        res.status(200).json(mapTaskDocUrls(task));
     } catch (error) {
         if (error instanceof CustomError) {
             return res.status(error.statusCode).json({ message: error.message });
@@ -161,7 +181,7 @@ const updateTask = async (req, res) => {
         };
 
         const updatedTask = await taskModel.update(taskId, finalPayload);
-        res.status(200).json(updatedTask);
+        res.status(200).json(mapTaskDocUrls(updatedTask));
     } catch (error) {
         if (error instanceof CustomError) {
             return res.status(error.statusCode).json({ message: error.message });
@@ -188,7 +208,7 @@ const updateTaskStatus = async (req, res) => {
         
         const completed_at = status === 'completed' ? new Date() : null;
         const updatedTask = await taskModel.updateStatus(taskId, status, completed_at);
-        res.status(200).json(updatedTask);
+        res.status(200).json(mapTaskDocUrls(updatedTask));
     } catch (error) {
         if (error instanceof CustomError) {
             return res.status(error.statusCode).json({ message: error.message });

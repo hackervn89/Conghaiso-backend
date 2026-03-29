@@ -7,6 +7,26 @@ const qrcode = require('qrcode');
 const redis = require('../services/redisService');
 
 const { CustomError } = require('../models/errors');
+
+/**
+ * Helper function to transform relative file paths to full URLs for a meeting.
+ * @param {object} meeting - The meeting object.
+ * @returns {object} The meeting object with full URLs for documents.
+ */
+const mapMeetingDocUrls = (meeting) => {
+    if (meeting && meeting.agenda && Array.isArray(meeting.agenda)) {
+        meeting.agenda.forEach(ag => {
+            if (ag && ag.documents && Array.isArray(ag.documents)) {
+                ag.documents = ag.documents.map(doc => ({
+                    ...doc,
+                    // Yêu cầu 4: Trả về Full URL
+                    filePath: doc.filePath ? `${process.env.BASE_URL}/uploads/${doc.filePath}` : null
+                }));
+            }
+        });
+    }
+    return meeting;
+};
 /**
  * Checks if a user has management permissions for a specific meeting.
  * @param {object} user - The user object from req.user.
@@ -67,7 +87,7 @@ const createMeeting = async (req, res) => {
             );
         }
     }
-    res.status(201).json({ message: 'Tạo cuộc họp thành công!', meeting: newMeeting });
+    res.status(201).json({ message: 'Tạo cuộc họp thành công!', meeting: mapMeetingDocUrls(newMeeting) });
   } catch (error) {
     console.error('Lỗi khi tạo cuộc họp:', error);
     res.status(500).json({ message: 'Lỗi server khi tạo cuộc họp.' });
@@ -93,7 +113,7 @@ const getMeetingById = async (req, res) => {
     const cachedData = await redis.get(cacheKey);
     if (cachedData) {
       console.log(`Cache HIT for meeting: ${meetingId}`);
-      // Data in Redis is a string, so we need to parse it back to JSON
+      // Data in Redis is a string, so we need to parse it back to JSON. The URL is already transformed before caching.
       return res.status(200).json(JSON.parse(cachedData));
     }
 
@@ -104,13 +124,16 @@ const getMeetingById = async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy cuộc họp hoặc không có quyền truy cập.' });
     }
 
+    // Yêu cầu 4: Trả về Full URL
+    const meetingWithUrls = mapMeetingDocUrls(meeting);
+
     // 3. Store in Redis before returning
     const ttl = process.env.CACHE_TTL_MEETING_DETAILS || 300; // 5 minutes default
     // Use 'EX' for expiration in seconds. Data must be a string.
-    await redis.set(cacheKey, JSON.stringify(meeting), 'EX', ttl);
+    await redis.set(cacheKey, JSON.stringify(meetingWithUrls), 'EX', ttl);
     console.log(`Stored meeting ${meetingId} in Redis cache with TTL: ${ttl}s`);
 
-    res.status(200).json(meeting);
+    res.status(200).json(meetingWithUrls);
   } catch (error) {
     console.error('Lỗi khi lấy chi tiết cuộc họp:', error);
     res.status(500).json({ message: 'Lỗi server.' });
@@ -151,7 +174,7 @@ const updateMeeting = async (req, res) => {
     await redis.del(cacheKey);
     console.log(`Cache invalidated in Redis for meeting: ${meetingId}`);
 
-    res.status(200).json({ message: 'Cập nhật cuộc họp thành công!', meeting: updatedMeeting });
+    res.status(200).json({ message: 'Cập nhật cuộc họp thành công!', meeting: mapMeetingDocUrls(updatedMeeting) });
   } catch (error) {
     console.error('Lỗi khi cập nhật cuộc họp:', error);
     res.status(500).json({ message: 'Lỗi server.' });

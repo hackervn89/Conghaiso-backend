@@ -4,6 +4,22 @@ const notificationService = require('../services/notificationService');
 const userModel = require('../models/userModel');
 const path = require('path');
 
+/**
+ * Helper function to transform relative file paths to full URLs for a draft.
+ * @param {object} draft - The draft object.
+ * @returns {object} The draft object with full URLs for attachments.
+ */
+const mapDraftDocUrls = (draft) => {
+    if (draft && draft.attachments && Array.isArray(draft.attachments)) {
+        draft.attachments = draft.attachments.map(doc => ({
+            ...doc,
+            // Yêu cầu 4: Trả về Full URL
+            file_path: doc.file_path ? `${process.env.BASE_URL}/uploads/${doc.file_path}` : null
+        }));
+    }
+    return draft;
+};
+
 const createDraft = async (req, res) => {
     try {
         const creatorId = req.user.user_id;
@@ -98,7 +114,7 @@ const getDraftById = async (req, res) => {
             draft.comments = [];
         }
 
-        res.status(200).json(draft);
+        res.status(200).json(mapDraftDocUrls(draft));
     } catch (error) {
         console.error('Lỗi khi lấy chi tiết dự thảo:', error);
         res.status(500).json({ message: 'Lỗi server khi lấy chi tiết dự thảo.' });
