@@ -74,7 +74,7 @@ ${context}
 --- KẾT THÚC TÀI LIỆU ---
 YÊU CẦU:
 1. Trả lời chính xác dựa trên tài liệu.
-2. Nếu câu hỏi yêu cầu tổng hợp hoặc so sánh (ví dụ: các thôn), hãy trích xuất thông tin từ TẤT CẢ các đoạn tài liệu có liên quan để lập bảng hoặc liệt kê đầy đủ.
+2. Nếu câu hỏi yêu cầu tổng hợp hoặc so sánh (ví dụ: các thôn,...), hãy trích xuất thông tin từ TẤT CẢ các đoạn tài liệu có liên quan để lập bảng hoặc liệt kê đầy đủ.
 3. Nếu tài liệu thiếu thông tin, hãy nói rõ là "Hiện tại tôi chưa được huấn luyện về vấn đề nay, mong bạn thông cảm".
 4. Giữ giọng điệu chuyên nghiệp, hành chính, không bao giờ đề cập đến việc bạn đã được cung cấp tài liệu tham khảo, chỉ cần nêu theo kiến thức được cung cấp.`;
             
