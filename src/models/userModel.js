@@ -7,7 +7,21 @@ const findByUsername = async (username) => {
   return rows[0];
 };
 const findById = async (id) => {
-  const { rows } = await db.query('SELECT user_id, full_name, username, email, position, role FROM users WHERE user_id = $1', [id]);
+  const query = `
+      SELECT 
+          u.user_id, u.full_name, u.username, u.email, u.position, u.role,
+          COALESCE(
+              (
+                  SELECT array_agg(org_id) 
+                  FROM user_organizations 
+                  WHERE user_id = u.user_id
+              ), 
+              '{}'::int[]
+          ) AS "orgIds"
+      FROM users u
+      WHERE u.user_id = $1;
+  `;
+  const { rows } = await db.query(query, [id]);
   return rows[0];
 };
 const findUserWithOrgsById = async (id) => {

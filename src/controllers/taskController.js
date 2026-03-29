@@ -22,9 +22,8 @@ const canUpdateTaskStatus = async (task, user) => {
         return true;
     }
 
-    // Kiểm tra xem người dùng có thuộc đơn vị được giao không
-    const userOrgsQuery = await db.query('SELECT org_id FROM user_organizations WHERE user_id = $1', [user.user_id]);
-    const userOrgIds = userOrgsQuery.rows.map(r => r.org_id);
+    // Kiểm tra xem người dùng có thuộc đơn vị được giao không (Lấy từ RAM)
+    const userOrgIds = user.orgIds || [];
     
     // Đảm bảo task.assignedOrgIds là một mảng
     const assignedOrgIds = Array.isArray(task.assignedOrgIds) ? task.assignedOrgIds : [];
