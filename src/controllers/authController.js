@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const userModel = require('../models/userModel');
 
 const login = async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, clientType } = req.body;
   if (!username || !password) {
     return res.status(400).json({ message: 'Vui lòng cung cấp tên đăng nhập và mật khẩu.' });
   }
@@ -30,7 +30,12 @@ const login = async (req, res) => {
 
     // Tạo payload đầy đủ thông tin
     const payload = { userId: user.user_id, username: user.username, role: user.role, managedScopes: managedScopes };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
+
+    // [THÊM MỚI] Quyết định thời gian hết hạn dựa trên nền tảng
+    // Nếu clientType là 'app' thì cho phép 30 ngày, ngược lại (web hoặc mặc định) là 1 ngày
+    const tokenExpiresIn = clientType === 'app' ? '30d' : '1d'; 
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: tokenExpiresIn });
 
     res.status(200).json({
       message: 'Đăng nhập thành công!',
