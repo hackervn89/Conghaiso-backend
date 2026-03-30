@@ -19,8 +19,9 @@ const mapMeetingDocUrls = (meeting) => {
             if (ag && ag.documents && Array.isArray(ag.documents)) {
                 ag.documents = ag.documents.map(doc => ({
                     ...doc,
-                    // Yêu cầu 4: Trả về Full URL
-                    filePath: doc.filePath ? `${process.env.BASE_URL}/uploads/${doc.filePath}` : null
+                    // Task 4: Chuẩn hóa Static File và Full URL
+                    // Sử dụng new URL() để tránh lỗi double slash (//)
+                    filePath: doc.filePath ? new URL(`/uploads/${doc.filePath}`, process.env.BASE_URL).href : null
                 }));
             }
         });

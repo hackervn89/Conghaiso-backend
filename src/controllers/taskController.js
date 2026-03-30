@@ -14,8 +14,9 @@ const mapTaskDocUrls = (task) => {
     if (task && task.documents && Array.isArray(task.documents)) {
         task.documents = task.documents.map(doc => ({
             ...doc,
-            // Yêu cầu 4: Trả về Full URL
-            filePath: doc.filePath ? `${process.env.BASE_URL}/uploads/${doc.filePath}` : null
+            // Task 4: Chuẩn hóa Static File và Full URL
+            // Sử dụng new URL() để tránh lỗi double slash (//)
+            filePath: doc.filePath ? new URL(`/uploads/${doc.filePath}`, process.env.BASE_URL).href : null
         }));
     }
     return task;
@@ -56,43 +57,54 @@ const createTask = async (req, res) => {
     try {
         const creatorId = req.user.user_id;
         const { newDocumentPaths, ...taskData } = req.body;
+        let initialTask = null;
 
-        // 1. Tạo công việc cơ bản trước để lấy task_id
-        const initialTask = await taskModel.create(taskData, creatorId);
+        try {
+            // 1. Tạo công việc cơ bản trước để lấy task_id
+            initialTask = await taskModel.create(taskData, creatorId);
 
-        // 2. Xử lý và di chuyển file nếu có
-        const finalDocuments = [];
-        if (newDocumentPaths && newDocumentPaths.length > 0) {
-            for (const tempPath of newDocumentPaths) {
-                if (tempPath) {
-                    const moveResult = await storageService.moveFileToTaskFolder(tempPath, initialTask.task_id);
-                    finalDocuments.push({
-                        name: moveResult.originalName,
-                        filePath: moveResult.finalPath
-                    });
+            // 2. Xử lý và di chuyển file nếu có
+            if (newDocumentPaths && newDocumentPaths.length > 0) {
+                const finalDocuments = [];
+                for (const tempPath of newDocumentPaths) {
+                    if (tempPath) {
+                        const moveResult = await storageService.moveFileToTaskFolder(tempPath, initialTask.task_id);
+                        finalDocuments.push({
+                            name: moveResult.originalName,
+                            filePath: moveResult.finalPath
+                        });
+                    }
+                }
+                // 3. Cập nhật CSDL với thông tin tài liệu
+                await taskModel.addDocuments(initialTask.task_id, finalDocuments);
+            }
+
+            // Gửi thông báo đẩy cho người nhận việc
+            if (initialTask.trackerIds && initialTask.trackerIds.length > 0) {
+                const pushTokens = await userModel.findPushTokensByUserIds(initialTask.trackerIds);
+                if (pushTokens.length > 0) {
+                    notificationService.sendPushNotifications(
+                        pushTokens,
+                        'Công việc mới được giao',
+                        `Bạn nhận được một công việc mới: "${initialTask.title}" từ ${req.user.full_name}.`,
+                        { taskId: initialTask.task_id }
+                    );
                 }
             }
-            // 3. Cập nhật CSDL với thông tin tài liệu
-            await taskModel.addDocuments(initialTask.task_id, finalDocuments);
-        }
 
-        // Gửi thông báo đẩy cho người nhận việc
-        if (initialTask.trackerIds && initialTask.trackerIds.length > 0) {
-            const pushTokens = await userModel.findPushTokensByUserIds(initialTask.trackerIds);
-            if (pushTokens.length > 0) {
-                notificationService.sendPushNotifications(
-                    pushTokens,
-                    'Công việc mới được giao',
-                    `Bạn nhận được một công việc mới: "${initialTask.title}" từ ${req.user.full_name}.`,
-                    { taskId: initialTask.task_id }
-                );
+            // Sau khi xử lý file, lấy lại thông tin đầy đủ của công việc để trả về
+            // Điều này đảm bảo frontend nhận được cả thông tin tài liệu mới
+            const finalTask = await taskModel.findById(initialTask.task_id);
+            res.status(201).json(mapTaskDocUrls(finalTask));
+        } catch (fileError) {
+            // Task 3: Sửa lỗi "Race Condition" - Compensating Action
+            console.error(`[COMPENSATION] Lỗi khi xử lý file cho task. Bắt đầu rollback...`, fileError);
+            if (initialTask && initialTask.task_id) {
+                await taskModel.remove(initialTask.task_id);
+                // Cân nhắc xóa cả thư mục file đã tạo nếu cần
             }
+            throw fileError; // Ném lại lỗi để khối catch bên ngoài xử lý
         }
-
-        // Sau khi xử lý file, lấy lại thông tin đầy đủ của công việc để trả về
-        // Điều này đảm bảo frontend nhận được cả thông tin tài liệu mới
-        const finalTask = await taskModel.findById(initialTask.task_id);
-        res.status(201).json(mapTaskDocUrls(finalTask));
     } catch (error) {
         if (error instanceof CustomError) {
             console.warn(`[Task Create] Lỗi nghiệp vụ: ${error.message}`);

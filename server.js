@@ -68,10 +68,10 @@ const corsOptions = {
 // Áp dụng CORS cho Express API (phải đặt SAU middleware debug)
 app.use(cors(corsOptions));
 
-// Yêu cầu 2: Mở quyền truy cập file (Public Static Folder)
-// Cảnh báo: Điều này sẽ cho phép truy cập công khai vào tất cả các tệp trong thư mục uploads.
-// Bất kỳ logic xác thực nào trong fileController sẽ bị bỏ qua đối với các yêu cầu trực tiếp đến URL tệp.
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Task 4: Chuẩn hóa Static File
+// Mở quyền truy cập file tĩnh từ đường dẫn được cấu hình trong STORAGE_PATH.
+// Điều này đảm bảo tính nhất quán và hoạt động đúng ngay cả khi thư mục uploads nằm trên một ổ đĩa khác.
+app.use('/uploads', express.static(process.env.STORAGE_PATH));
 
 app.use(express.json());
 

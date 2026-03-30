@@ -59,11 +59,18 @@ const moveFileFromTemp = async (tempRelativePath, finalRelativePath) => {
     console.log(`  - FROM: ${sourceAbsolutePath}`);
     console.log(`  - TO:   ${destAbsolutePath}`);
     try {
+        // Đảm bảo thư mục đích tồn tại
         await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
-        await fs.rename(sourceAbsolutePath, destAbsolutePath);
+
+        // Task 1: Thay thế fs.rename bằng fs.copyFile + fs.unlink để tránh lỗi EXDEV
+        // Sao chép tệp từ nguồn đến đích
+        await fs.copyFile(sourceAbsolutePath, destAbsolutePath);
+        // Xóa tệp nguồn sau khi sao chép thành công
+        await fs.unlink(sourceAbsolutePath);
+
         return finalRelativePath;
     } catch (error) {
-        console.error(`Lỗi khi di chuyển tệp từ ${tempRelativePath} đến ${finalRelativePath}:`, error);
+        console.error(`[FATAL] Lỗi nghiêm trọng khi di chuyển tệp từ ${tempRelativePath} đến ${finalRelativePath}:`, error);
         throw error;
     }
 };
