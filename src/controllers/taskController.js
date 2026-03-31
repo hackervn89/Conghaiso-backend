@@ -14,9 +14,15 @@ const mapTaskDocUrls = (task) => {
     if (task && task.documents && Array.isArray(task.documents)) {
         task.documents = task.documents.map(doc => ({
             ...doc,
-            // Task 4: Chuẩn hóa Static File và Full URL
-            // Sử dụng new URL() để tránh lỗi double slash (//)
-            filePath: doc.filePath ? new URL(`/uploads/${doc.filePath}`, process.env.BASE_URL).href : null
+            filePath: (() => {
+                if (!doc.filePath) return null;
+                try {
+                    const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+                    return new URL(`/uploads/${doc.filePath.replace(/\\/g, '/')}`, baseUrl).href;
+                } catch (e) {
+                    return `/uploads/${doc.filePath.replace(/\\/g, '/')}`; // Fallback an toàn nếu URL build lỗi
+                }
+            })()
         }));
     }
     return task;
