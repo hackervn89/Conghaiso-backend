@@ -10,23 +10,8 @@ const storageService = require('../services/storageService'); // Import storageS
  * @param {object} task - The task object.
  * @returns {object} The task object with full URLs for documents.
  */
-const mapTaskDocUrls = (task) => {
-    if (task && task.documents && Array.isArray(task.documents)) {
-        task.documents = task.documents.map(doc => ({
-            ...doc,
-            filePath: (() => {
-                if (!doc.filePath) return null;
-                try {
-                    const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
-                    return new URL(`/uploads/${doc.filePath.replace(/\\/g, '/')}`, baseUrl).href;
-                } catch (e) {
-                    return `/uploads/${doc.filePath.replace(/\\/g, '/')}`; // Fallback an toàn nếu URL build lỗi
-                }
-            })()
-        }));
-    }
-    return task;
-};
+// mapTaskDocUrls đã bị vô hiệu hóa để trả về đường dẫn tương đối, giúp khớp với logic bảo mật /files/view
+const mapTaskDocUrls = (task) => task;
 
 // Helper function to check permissions for modification/deletion
 const canManageTask = (task, user) => {

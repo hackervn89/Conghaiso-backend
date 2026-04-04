@@ -13,9 +13,20 @@ const STORAGE_BASE_PATH = process.env.STORAGE_PATH;
  */
 const normalizePath = (p) => {
     if (!p) return '';
-    return p.replace(/\\/g, '/')          // Chuyển gạch ngược thành gạch xuôi
-            .replace(/^\/+/, '')          // Xóa gạch chéo ở đầu
-            .replace(/^uploads\//, '');   // Xóa tiền tố 'uploads/' nếu có (từ code cũ)
+    let clean = p.replace(/\\/g, '/'); // Chuẩn hóa gạch chéo
+    
+    // Nếu là một URL tuyệt đối (ví dụ từ log: http://.../uploads/tasks/...)
+    try {
+        if (clean.startsWith('http')) {
+            const url = new URL(clean);
+            clean = url.pathname; // Lấy phần /uploads/tasks/...
+        }
+    } catch (e) {
+        // Nếu không phải URL hợp lệ, giữ nguyên để xử lý tiếp
+    }
+
+    return clean.replace(/^\/+/, '')          // Xóa gạch chéo đầu
+                .replace(/^uploads\//, '');   // Xóa tiền tố uploads/
 };
 
 const serveFile = async (req, res) => {
