@@ -466,12 +466,24 @@ const addDocuments = async (taskId, documents) => {
 };
 
 const checkTaskAccess = async (taskId, user) => {
-    if (user.role === 'Admin' || user.role === 'Secretary') return true;
+    if (user.role === 'Admin' || user.role === 'Secretary') {
+        console.log(`[Task Access] CẤP QUYỀN: User ${user.user_id} là ${user.role}`);
+        return true;
+    }
     const { whereString, joinString, params, paramIndex } = buildTaskQuery(user, {});
     const finalWhere = whereString ? `${whereString} AND t.task_id = $${paramIndex}` : `WHERE t.task_id = $${paramIndex}`;
     const query = `SELECT 1 FROM tasks t ${joinString} ${finalWhere}`;
+    
+    console.log(`[Task Access] Đang kiểm tra quyền cho User ${user.user_id} trên Task ${taskId}...`);
     const { rows } = await db.query(query, [...params, taskId]);
-    return rows.length > 0;
+    
+    const hasAccess = rows.length > 0;
+    if (hasAccess) {
+        console.log(`[Task Access] CẤP QUYỀN: User ${user.user_id} có quyền truy cập Task ${taskId}`);
+    } else {
+        console.warn(`[Task Access] TỪ CHỐI: User ${user.user_id} KHÔNG có quyền truy cập Task ${taskId}`);
+    }
+    return hasAccess;
 };
 
 module.exports = {
