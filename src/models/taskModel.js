@@ -465,13 +465,23 @@ const addDocuments = async (taskId, documents) => {
     }
 };
 
+const checkTaskAccess = async (taskId, user) => {
+    if (user.role === 'Admin' || user.role === 'Secretary') return true;
+    const { whereString, joinString, params, paramIndex } = buildTaskQuery(user, {});
+    const finalWhere = whereString ? `${whereString} AND t.task_id = $${paramIndex}` : `WHERE t.task_id = $${paramIndex}`;
+    const query = `SELECT 1 FROM tasks t ${joinString} ${finalWhere}`;
+    const { rows } = await db.query(query, [...params, taskId]);
+    return rows.length > 0;
+};
+
 module.exports = {
     findAll,
-    getTasksSummary, // [FIX] Xuất (export) hàm mới
+    getTasksSummary,
     findById,
     create,
     update,
     updateStatus,
     remove,
-    addDocuments
+    addDocuments,
+    checkTaskAccess
 };

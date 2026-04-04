@@ -66,13 +66,9 @@ const serveFile = async (req, res) => {
                 hasPermission = true;
             }
         } else if (entityType === 'task') {
-            const task = await taskModel.findById(entityId);
-            if (task) {
-                const isCreator = task.creator_id === user.user_id;
-                const isTracker = task.trackerIds && task.trackerIds.includes(user.user_id);
-                if (user.role === 'Admin' || isCreator || isTracker) {
-                    hasPermission = true;
-                }
+            const hasAccess = await taskModel.checkTaskAccess(entityId, user);
+            if (hasAccess) {
+                hasPermission = true;
             }
         } else if (entityType === 'draft') {
             const draft = await draftModel.findById(entityId, user.user_id);
