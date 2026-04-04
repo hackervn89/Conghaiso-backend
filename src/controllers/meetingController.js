@@ -13,27 +13,8 @@ const { CustomError } = require('../models/errors');
  * @param {object} meeting - The meeting object.
  * @returns {object} The meeting object with full URLs for documents.
  */
-const mapMeetingDocUrls = (meeting) => {
-    if (meeting && meeting.agenda && Array.isArray(meeting.agenda)) {
-        meeting.agenda.forEach(ag => {
-            if (ag && ag.documents && Array.isArray(ag.documents)) {
-                ag.documents = ag.documents.map(doc => ({
-                    ...doc,
-                    filePath: (() => {
-                        if (!doc.filePath) return null;
-                        try {
-                            const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
-                            return new URL(`/uploads/${doc.filePath.replace(/\\/g, '/')}`, baseUrl).href;
-                        } catch (e) {
-                            return `/uploads/${doc.filePath.replace(/\\/g, '/')}`; // Fallback an toàn
-                        }
-                    })()
-                }));
-            }
-        });
-    }
-    return meeting;
-};
+// mapMeetingDocUrls đã bị vô hiệu hóa để trả về đường dẫn tương đối, giúp khớp với logic /files/view
+const mapMeetingDocUrls = (meeting) => meeting;
 /**
  * Checks if a user has management permissions for a specific meeting.
  * @param {object} user - The user object from req.user.
