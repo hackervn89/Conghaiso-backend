@@ -212,6 +212,15 @@ const findColleagues = async (userId) => {
 };
 
 
+/**
+ * Xóa push token không còn hợp lệ ra khỏi CSDL (token đã hết hạn hoặc thiết bị gỡ app).
+ * @param {string} token - Push token cần xóa.
+ */
+const deletePushToken = async (token) => {
+    await db.query('UPDATE users SET push_token = NULL WHERE push_token = $1', [token]);
+    console.log(`[UserModel] Đã xóa push token không hợp lệ khỏi CSDL: ${token}`);
+};
+
 module.exports = { 
   findByUsername, 
   findById, 
@@ -223,6 +232,7 @@ module.exports = {
   getLeaderScopes,
   findAllGroupedByOrganization,
   updatePushToken,
+  deletePushToken,
   findPushTokensByUserIds,
   findUserWithOrgsById,
   findPushTokensByMeetingId,

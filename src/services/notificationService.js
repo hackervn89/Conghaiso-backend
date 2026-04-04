@@ -1,6 +1,6 @@
 const { Expo } = require('expo-server-sdk');
 const path = require('path');
-const userModel = require('../models/userModel'); // Thêm userModel
+const userModel = require('../models/userModel');
 const fs = require('fs');
 
 // Đường dẫn đến file "chìa khóa" Firebase V1
@@ -65,15 +65,28 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
         }
     }
 
-    // Kiểm tra biên nhận
+    // Kiểm tra biên nhận và tự động dọn dẹp token rác
     let receiptIds = [];
-    for (const ticket of tickets) {
+    const tokenToReceiptMap = {}; // Ánh xạ receiptId -> token để xóa khi cần
+
+    for (let i = 0; i < tickets.length; i++) {
+        const ticket = tickets[i];
+        const correspondingToken = messages[i]?.to;
+
         if (ticket.status === 'ok' && ticket.id) {
             receiptIds.push(ticket.id);
+            tokenToReceiptMap[ticket.id] = correspondingToken;
         } else if (ticket.status === 'error') {
             console.error(`[Notification] Không thể xếp hàng thông báo. Lỗi từ Expo: ${ticket.message}`);
             if (ticket.details && ticket.details.error) {
-                console.error(`[Notification] Chi tiết lỗi: ${ticket.details.error}`);
+                const errCode = ticket.details.error;
+                console.error(`[Notification] Chi tiết lỗi: ${errCode}`);
+                // Tự động xóa token không hợp lệ
+                if ((errCode === 'DeviceNotRegistered' || errCode === 'InvalidCredentials') && correspondingToken) {
+                    userModel.deletePushToken(correspondingToken).catch(e => 
+                        console.error(`[Notification] Lỗi khi xóa token rác: ${e.message}`)
+                    );
+                }
             }
         }
     }
@@ -88,6 +101,12 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
                         console.error(`[Notification] Gửi thông báo THẤT BẠI. Biên nhận cho vé ${receiptId}:`, message);
                         if (details && details.error) {
                             console.error(`[Notification] Chi tiết lỗi từ Google/Apple: ${details.error}`);
+                            // Tự động xóa token khi thiết bị không còn đăng ký
+                            if (details.error === 'DeviceNotRegistered' && tokenToReceiptMap[receiptId]) {
+                                userModel.deletePushToken(tokenToReceiptMap[receiptId]).catch(e => 
+                                    console.error(`[Notification] Lỗi khi xóa token rác: ${e.message}`)
+                                );
+                            }
                         }
                     }
                 }
