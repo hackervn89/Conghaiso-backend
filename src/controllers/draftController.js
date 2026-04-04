@@ -3,29 +3,15 @@ const storageService = require('../services/storageService');
 const notificationService = require('../services/notificationService');
 const userModel = require('../models/userModel');
 const path = require('path');
+const libre = require('libreoffice-convert');
+libre.convertAsync = require('util').promisify(libre.convert);
 
 /**
  * Helper function to transform relative file paths to full URLs for a draft.
  * @param {object} draft - The draft object.
  * @returns {object} The draft object with full URLs for attachments.
  */
-const mapDraftDocUrls = (draft) => {
-    if (draft && draft.attachments && Array.isArray(draft.attachments)) {
-        draft.attachments = draft.attachments.map(doc => ({
-            ...doc,
-            file_path: (() => {
-                if (!doc.file_path) return null;
-                try {
-                    const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
-                    return new URL(`/uploads/${doc.file_path.replace(/\\/g, '/')}`, baseUrl).href;
-                } catch (e) {
-                    return `/uploads/${doc.file_path.replace(/\\/g, '/')}`; // Fallback an toàn
-                }
-            })()
-        }));
-    }
-    return draft;
-};
+// mapDraftDocUrls đã bị loại bỏ vì Frontend xử lý tệp qua /files/view
 
 const createDraft = async (req, res) => {
     try {
@@ -47,11 +33,26 @@ const createDraft = async (req, res) => {
             return res.status(400).json({ message: '`participants` phải là một chuỗi JSON của một mảng các user_id.' });
         }
 
-        // 2. Decode file names
-        const decodedFiles = documents.map(file => ({
-            ...file,
-            originalname: Buffer.from(file.originalname, 'latin1').toString('utf8')
-        }));
+        // 2. Decode file names và chuyển đổi sang PDF nếu cần
+        const decodedFiles = [];
+        for (const file of documents) {
+            let finalFile = { ...file };
+            finalFile.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+            const fileExt = path.extname(finalFile.originalname).toLowerCase();
+            
+            if (['.doc', '.docx'].includes(fileExt)) {
+                try {
+                    const pdfBuffer = await libre.convertAsync(finalFile.buffer, '.pdf', undefined);
+                    finalFile.originalname = finalFile.originalname.replace(new RegExp(`${fileExt}$`, 'i'), '.pdf');
+                    finalFile.buffer = pdfBuffer;
+                    finalFile.mimetype = 'application/pdf';
+                } catch (err) {
+                    console.error('Lỗi chuyển đổi PDF trong dự thảo:', err);
+                    throw new Error(`Không thể chuyển đổi file ${finalFile.originalname} sang PDF.`);
+                }
+            }
+            decodedFiles.push(finalFile);
+        }
 
         // 3. Bắt đầu transaction: Tạo draft -> Lưu file -> Lưu attachment
         const draftData = {
@@ -121,7 +122,7 @@ const getDraftById = async (req, res) => {
             draft.comments = [];
         }
 
-        res.status(200).json(mapDraftDocUrls(draft));
+        res.status(200).json(draft);
     } catch (error) {
         console.error('Lỗi khi lấy chi tiết dự thảo:', error);
         res.status(500).json({ message: 'Lỗi server khi lấy chi tiết dự thảo.' });
