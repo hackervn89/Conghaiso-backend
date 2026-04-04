@@ -25,7 +25,7 @@ const uploadDocument = async (req, res) => {
       finalFile.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
       const fileExt = path.extname(finalFile.originalname).toLowerCase();
 
-      // SỬA LỖI: Chuyển đổi trực tiếp (đồng bộ) đối với file .doc/.docx thay vì dùng Queues
+      // Chuyển đổi trực tiếp đối với file .doc/.docx
       if (['.doc', '.docx'].includes(fileExt)) {
         console.log(`[Upload] Đang tiến hành chuyển đổi file ${finalFile.originalname} sang PDF...`);
         try {
@@ -62,15 +62,6 @@ const uploadDocument = async (req, res) => {
     });
 
     await Promise.all(processingPromises);
-
-    // Task 2: Trả về status 202 Accepted nếu có file đang được xử lý
-    if (processingFiles.length > 0) {
-      return res.status(202).json({
-        message: `Đã nhận ${req.files.length} file. ${filesInfo.length} file sẵn sàng, ${processingFiles.length} file đang được xử lý nền.`,
-        files: filesInfo, // Các file đã sẵn sàng
-        processing: processingFiles // Các file đang xử lý
-      });
-    }
 
     res.status(201).json({
       message: `Tải lên thành công ${filesInfo.length} file vào thư mục tạm.`,
