@@ -11,15 +11,15 @@ let expo;
 if (fs.existsSync(SERVICE_ACCOUNT_KEY_PATH)) {
     const credentials = require(SERVICE_ACCOUNT_KEY_PATH);
     expo = new Expo({
-      useFcmV1: true,
-      serviceAccountCredentials: credentials,
-      // experienceId là cần thiết để Expo có thể định danh project khi gửi thông báo Firebase V1
-      experienceId: '@phonghopsoapk/conghaisoapp',
+        useFcmV1: true,
+        serviceAccountCredentials: credentials,
+        // experienceId là cần thiết để Expo có thể định danh project khi gửi thông báo Firebase V1
+        experienceId: '@phonghopsoapk/conghaisoapp',
     });
 } else {
     console.warn(`[WARN] Không tìm thấy file FCM credentials tại: ${SERVICE_ACCOUNT_KEY_PATH}. Chức năng thông báo đẩy sẽ không hoạt động.`);
     expo = {
-        sendPushNotificationsAsync: async () => {},
+        sendPushNotificationsAsync: async () => { },
         chunkPushNotifications: () => [],
         isExpoPushToken: () => false,
     };
@@ -83,9 +83,10 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
             if (ticket.details && ticket.details.error) {
                 const errCode = ticket.details.error;
                 console.error(`[Notification] Chi tiết lỗi: ${errCode}`);
-                // Tự động xóa token không hợp lệ
-                if ((errCode === 'DeviceNotRegistered' || errCode === 'InvalidCredentials') && correspondingToken) {
-                    userModel.deletePushToken(correspondingToken).catch(e => 
+                // CHỈ xóa token khi thiết bị không còn đăng ký (người dùng gỡ app).
+                // KHÔNG xóa khi InvalidCredentials - đó là lỗi cấu hình server, token vẫn còn hợp lệ.
+                if (errCode === 'DeviceNotRegistered' && correspondingToken) {
+                    userModel.deletePushToken(correspondingToken).catch(e =>
                         console.error(`[Notification] Lỗi khi xóa token rác: ${e.message}`)
                     );
                 }
@@ -105,7 +106,7 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
                             console.error(`[Notification] Chi tiết lỗi từ Google/Apple: ${details.error}`);
                             // Tự động xóa token khi thiết bị không còn đăng ký
                             if (details.error === 'DeviceNotRegistered' && tokenToReceiptMap[receiptId]) {
-                                userModel.deletePushToken(tokenToReceiptMap[receiptId]).catch(e => 
+                                userModel.deletePushToken(tokenToReceiptMap[receiptId]).catch(e =>
                                     console.error(`[Notification] Lỗi khi xóa token rác: ${e.message}`)
                                 );
                             }
