@@ -171,7 +171,16 @@ const saveDraftAttachment = async (file, draftId) => {
     const destAbsolutePath = getAbsolutePath(finalRelativePath);
 
     await fs.mkdir(path.dirname(destAbsolutePath), { recursive: true });
-    await fs.writeFile(destAbsolutePath, file.buffer);
+    
+    // Hỗ trợ cho cả 2 loại cấu hình của Multer
+    if (file.buffer) {
+        await fs.writeFile(destAbsolutePath, file.buffer);
+    } else if (file.path) {
+        await fs.copyFile(file.path, destAbsolutePath);
+    } else {
+        throw new Error("File tải lên bị hỏng, không có thuộc tính buffer hoặc path.");
+    }
+    
     return finalRelativePath;
 };
 
