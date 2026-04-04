@@ -27,7 +27,6 @@ if (fs.existsSync(SERVICE_ACCOUNT_KEY_PATH)) {
 const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
     // Lọc ra các token hợp lệ theo định dạng của Expo
     const validPushTokens = pushTokens.filter(token => Expo.isExpoPushToken(token));
-
     const uniqueValidPushTokens = [...new Set(validPushTokens)];
 
     if (uniqueValidPushTokens.length === 0) {
@@ -39,6 +38,7 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
         return;
     }
 
+    // Tạo messages
     const messages = uniqueValidPushTokens.map(pushToken => ({
         to: pushToken,
         sound: 'default',
@@ -47,27 +47,31 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
         data: data,
     }));
 
-    const chunks = expo.chunkPushNotifications(messages);
+    // Gửi từng message một cách độc lập để tránh xung đột experience ID
     const tickets = [];
-
-    for (const chunk of chunks) {
+    for (const message of messages) {
         try {
-            const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-            tickets.push(...ticketChunk);
+            const chunks = expo.chunkPushNotifications([message]);
+            for (const chunk of chunks) {
+                const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+                tickets.push(...ticketChunk);
+            }
         } catch (error) {
-            console.error('Lỗi khi gửi chunk thông báo:', error);
+            if (error.code === 'PUSH_TOO_MANY_EXPERIENCE_IDS') {
+                console.warn(`[Notification] Token ${message.to} thuộc project khác, bỏ qua.`);
+            } else {
+                console.error(`[Notification] Lỗi khi gửi cho token ${message.to}:`, error.message);
+            }
         }
     }
 
+    // Kiểm tra biên nhận
     let receiptIds = [];
     for (const ticket of tickets) {
         if (ticket.status === 'ok' && ticket.id) {
             receiptIds.push(ticket.id);
         } else if (ticket.status === 'error') {
-            // Ghi log ngay lập tức nếu Expo từ chối vé gửi
-            console.error(
-                `[Notification] Không thể xếp hàng thông báo. Lỗi từ Expo: ${ticket.message}`
-            );
+            console.error(`[Notification] Không thể xếp hàng thông báo. Lỗi từ Expo: ${ticket.message}`);
             if (ticket.details && ticket.details.error) {
                 console.error(`[Notification] Chi tiết lỗi: ${ticket.details.error}`);
             }
@@ -75,18 +79,14 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
     }
 
     if (receiptIds.length > 0) {
-        // Trong ứng dụng thực tế, bạn sẽ lưu receiptIds và kiểm tra bằng một tác vụ nền.
-        // Ở đây, chúng ta kiểm tra sau 10 giây để gỡ lỗi.
         setTimeout(async () => {
             try {
                 const receipts = await expo.getPushNotificationReceiptsAsync(receiptIds);
-
                 for (const receiptId in receipts) {
                     const { status, message, details } = receipts[receiptId];
                     if (status === 'error') {
                         console.error(`[Notification] Gửi thông báo THẤT BẠI. Biên nhận cho vé ${receiptId}:`, message);
                         if (details && details.error) {
-                            // Các lỗi phổ biến: DeviceNotRegistered, MessageTooBig, MessageRateExceeded...
                             console.error(`[Notification] Chi tiết lỗi từ Google/Apple: ${details.error}`);
                         }
                     }
@@ -94,7 +94,7 @@ const sendPushNotifications = async (pushTokens, title, body, data = {}) => {
             } catch (error) {
                 console.error('Lỗi khi kiểm tra biên nhận:', error);
             }
-        }, 10000); // Kiểm tra sau 10 giây
+        }, 10000);
     }
 };
 
