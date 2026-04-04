@@ -13,6 +13,8 @@ if (fs.existsSync(SERVICE_ACCOUNT_KEY_PATH)) {
     expo = new Expo({
       useFcmV1: true,
       serviceAccountCredentials: credentials,
+      // experienceId là cần thiết để Expo có thể định danh project khi gửi thông báo Firebase V1
+      experienceId: '@phonghopsoapk/conghaisoapp',
     });
 } else {
     console.warn(`[WARN] Không tìm thấy file FCM credentials tại: ${SERVICE_ACCOUNT_KEY_PATH}. Chức năng thông báo đẩy sẽ không hoạt động.`);
