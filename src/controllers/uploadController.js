@@ -25,24 +25,32 @@ const uploadDocument = async (req, res) => {
       finalFile.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
       const fileExt = path.extname(finalFile.originalname).toLowerCase();
 
-      // Task 2: Thay đổi logic xử lý file .doc/.docx
+      // SỬA LỖI: Chuyển đổi trực tiếp (đồng bộ) đối với file .doc/.docx thay vì dùng Queues
       if (['.doc', '.docx'].includes(fileExt)) {
-        // Thay vì convert trực tiếp, ta lưu file gốc và đưa vào hàng đợi
-        console.log(`[Upload] Đưa file ${finalFile.originalname} vào hàng đợi chuyển đổi...`);
-        const tempPath = await storageService.saveFileToTempFolder(finalFile);
-        
-        // Thêm vào hàng đợi xử lý (ví dụ với BullMQ)
-        // await conversionQueue.add('convert-to-pdf', { 
-        //   tempPath, 
-        //   originalname: finalFile.originalname,
-        //   userId: req.user.user_id // Để gửi thông báo khi hoàn thành
-        // });
-
-        processingFiles.push({
-          name: finalFile.originalname,
-          message: "Đang được xử lý chuyển đổi sang PDF."
-        });
-
+        console.log(`[Upload] Đang tiến hành chuyển đổi file ${finalFile.originalname} sang PDF...`);
+        try {
+          const pdfBuffer = await libre.convertAsync(finalFile.buffer, '.pdf', undefined);
+          
+          const pdfFile = {
+             ...finalFile,
+             originalname: finalFile.originalname.replace(new RegExp(`${fileExt}$`, 'i'), '.pdf'),
+             buffer: pdfBuffer,
+             mimetype: 'application/pdf'
+          };
+          
+          const tempPath = await storageService.saveFileToTempFolder(pdfFile);
+          
+          filesInfo.push({
+            filePath: tempPath,
+            name: pdfFile.originalname,
+            originalName: finalFile.originalname,
+          });
+          
+          console.log(`[Upload] Chuyển đổi thành công: ${pdfFile.originalname}`);
+        } catch (convertError) {
+           console.error(`[Upload] Lỗi khi chuyển đổi ${finalFile.originalname} sang PDF:`, convertError);
+           throw new Error(`Lỗi chuyển đổi file ${finalFile.originalname} (Yêu cầu LibreOffice trên Server).`);
+        }
       } else {
         // Các loại file khác (PDF, TXT, ảnh,...) được lưu trực tiếp
         const tempPath = await storageService.saveFileToTempFolder(finalFile);

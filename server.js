@@ -237,8 +237,8 @@ io.on('connection', (socket) => {
 // Bắt các lỗi không được xử lý trong toàn bộ ứng dụng
 process.on('uncaughtException', (err, origin) => {
   console.error(`[FATAL] Lỗi UNCAUGHT EXCEPTION tại ${origin}:`, err);
-  // Trong môi trường production, bạn có thể muốn khởi động lại server ở đây.
-  // process.exit(1);
+  // Thoát server ngay lập tức để PM2 có thể tự động restart lại
+  process.exit(1);
 });
 
 // Bắt các promise bị reject mà không có .catch()
