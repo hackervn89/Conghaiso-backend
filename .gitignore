@@ -3,10 +3,22 @@
 
 # Environment variables
 .env
+.env.local
+.env.production
 
-# Google Drive credentials
+# Google/FCM credentials
 src/config/credentials.json
 src/config/fcm_credentials.json
 
-#redis máy local
+# Redis máy local
 src/services/redis-local.js
+
+# Test data chứa credentials
+users.json
+
+# Uploads (dữ liệu người dùng, không nên commit)
+uploads/
+
+# Logs
+logs/
+*.log

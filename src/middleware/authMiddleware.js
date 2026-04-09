@@ -1,5 +1,8 @@
 const jwt = require('jsonwebtoken');
 const userModel = require('../models/userModel');
+const redisClient = require('../services/redisService');
+
+const TOKEN_BLACKLIST_PREFIX = 'bl_token:';
 
 // Middleware 1: Kiểm tra token và xác thực người dùng
 const authenticate = async (req, res, next) => {
@@ -8,23 +11,29 @@ const authenticate = async (req, res, next) => {
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
       token = req.headers.authorization.split(' ')[1];
+
+      // [BẢO MẬT] Kiểm tra token blacklist trong Redis
+      if (!redisClient.isMock) {
+        const isBlacklisted = await redisClient.get(`${TOKEN_BLACKLIST_PREFIX}${token}`);
+        if (isBlacklisted) {
+          return res.status(401).json({ message: 'Token đã bị thu hồi, vui lòng đăng nhập lại.' });
+        }
+      }
+
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // Lấy thông tin mới nhất của user từ DB để đảm bảo không dùng dữ liệu cũ
+      // Lấy thông tin mới nhất của user từ DB
       const freshUserFromDb = await userModel.findById(decoded.userId);
 
       if (!freshUserFromDb) {
         return res.status(401).json({ message: 'Người dùng không tồn tại.' });
       }
 
-      // [SỬA LỖI TRIỆT ĐỂ]
-      // Gán đối tượng người dùng từ CSDL làm cơ sở.
       req.user = freshUserFromDb;
-      // Sau đó, chỉ gắn thêm thuộc tính 'managedScopes' từ token đã giải mã vào.
-      // Điều này đảm bảo tính nhất quán của đối tượng user và bổ sung đúng quyền hạn.
       req.user.managedScopes = decoded.managedScopes;
+      req.token = token; // Lưu token để dùng khi logout
 
-      next(); // Token hợp lệ, cho phép đi tiếp
+      next();
     } catch (error) {
       console.error('Lỗi xác thực JWT:', error.name);
       return res.status(401).json({ message: 'Token không hợp lệ, không có quyền truy cập.' });
@@ -48,8 +57,8 @@ const authorize = (roles) => {
         message: `Từ chối truy cập. Yêu cầu vai trò là một trong các quyền sau: ${roles.join(', ')}.` 
       });
     }
-    next(); // Có quyền, cho phép đi tiếp
+    next();
   };
 };
 
-module.exports = { authenticate, authorize };
+module.exports = { authenticate, authorize, TOKEN_BLACKLIST_PREFIX };
