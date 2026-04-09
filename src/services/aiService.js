@@ -4,17 +4,15 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // --- CẤU HÌNH MODEL (Đã tối ưu hóa Quota) ---
 
-// [UPDATE] Sử dụng Flash-8B: Phiên bản nhỏ nhất, nhanh nhất, tiết kiệm quota nhất.
-// Dùng cho: Phân loại câu hỏi (Router), tóm tắt ngắn, tách từ khóa.
+// [UPDATE] Sử dụng Gemini 3.0 Flash Lite: Phiên bản Lite thế hệ 3 mới nhất.
 const flashLiteModel = genAI.getGenerativeModel({
-    model: "gemini-2.5-pro-1p-freebie", 
+    model: "gemini-3.0-flash-lite", 
 });
 
-// [UPDATE] Sử dụng Flash 1.5 Stable: Phiên bản ổn định, hạn mức miễn phí cao (1500 req/ngày).
-// Dùng cho: Trả lời câu hỏi (RAG), suy luận, tổng hợp thông tin.
+// [UPDATE] Sử dụng Gemini 3.0 Flash Lite cho RAG & Search
 const flashModel = genAI.getGenerativeModel({
-    model: "gemini-2.5-pro-1p-freebie",
-    tools: [{ "google_search": {} }], // Bật Google Search
+    model: "gemini-3.0-flash-lite",
+    tools: [{ "google_search": {} }], 
 });
 
 // Model dùng để tạo vector (Text Embedding 004 là chuẩn nhất hiện nay)
@@ -45,7 +43,7 @@ const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
             for (let i = 0; i < requests.length; i += BATCH_SIZE) {
                 const batchRequests = requests.slice(i, i + BATCH_SIZE);
                 // console.log(`[AI Service] Xử lý lô ${Math.floor(i / BATCH_SIZE) + 1}...`);
-                
+
                 const result = await embeddingModel.batchEmbedContents({ requests: batchRequests });
                 const embeddings = result.embeddings.map(e => e.values);
                 allEmbeddings.push(...embeddings);
@@ -82,7 +80,7 @@ const generateChatResponse = async ({ systemInstruction, history = [], prompt, t
     // flash-lite -> gemini-1.5-flash-8b (Nhanh, Rẻ)
     // flash -> gemini-1.5-flash (Thông minh, Ổn định)
     const chatModel = modelType === 'flash-lite' ? flashLiteModel : flashModel;
-    const modelName = modelType === 'flash-lite' ? 'gemini-2.5-pro-1p-freebie' : 'gemini-2.5-pro-1p-freebie';
+    const modelName = 'gemini-3.0-flash-lite';
 
     const execute = async (retriesLeft, delay) => {
         try {
@@ -100,22 +98,22 @@ const generateChatResponse = async ({ systemInstruction, history = [], prompt, t
             const chat = chatModel.startChat(modelParams);
             const result = await chat.sendMessage(prompt);
             const response = await result.response;
-            
+
             return { text: response.text(), functionCalls: response.functionCalls() };
         } catch (error) {
             // Cơ chế tự động thử lại (Retry) khi gặp lỗi quá tải (429, 503)
             if (error.name === 'GoogleGenerativeAIFetchError' && (error.message.includes('503') || error.message.includes('429')) && retriesLeft > 0) {
-                console.warn(`[AI Service] Model ${modelName} đang bận. Thử lại sau ${delay/1000}s... (Còn ${retriesLeft} lần)`);
+                console.warn(`[AI Service] Model ${modelName} đang bận. Thử lại sau ${delay / 1000}s... (Còn ${retriesLeft} lần)`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return execute(retriesLeft - 1, delay * 2); // Exponential Backoff
             }
-            
+
             console.error(`Lỗi nghiêm trọng từ Gemini API (${modelName}):`, error.message);
-            
+
             // Trả về thông báo lỗi thân thiện thay vì làm sập server
-            return { 
-                text: "Hệ thống AI đang quá tải hoặc đã hết hạn mức sử dụng trong ngày. Vui lòng thử lại sau hoặc liên hệ quản trị viên để nâng cấp gói dịch vụ.", 
-                functionCalls: [] 
+            return {
+                text: "Hệ thống AI đang quá tải hoặc đã hết hạn mức sử dụng trong ngày. Vui lòng thử lại sau hoặc liên hệ quản trị viên để nâng cấp gói dịch vụ.",
+                functionCalls: []
             };
         }
     }

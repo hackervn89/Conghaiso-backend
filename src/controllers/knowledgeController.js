@@ -7,7 +7,7 @@ const mammoth = require('mammoth');
 const path = require('path');
 const { GoogleGenerativeAI, TaskType } = require('@google/generative-ai');
 
-const SIMILARITY_THRESHOLD = 0.5; 
+const SIMILARITY_THRESHOLD = 0.5;
 const MAX_TOKENS_PER_CHUNK = 4000; // Giới hạn an toàn cho Flash Model
 const OVERLAP_SENTENCES_COUNT = 2; // Giảm overlap để tránh lặp nội dung thừa
 
@@ -40,23 +40,23 @@ function getHeadingInfo(line) {
     const patterns = [
         // --- CẤP 1 (Root): Tên Thôn / Phần lớn ---
         // Bắt: "A. THÔN...", "PHẦN I", "CHƯƠNG I"
-        { 
-            level: 1, 
-            regex: /^(PHẦN\s+|CHƯƠNG\s+|[A-Z]\.\s+THÔN|[A-Z]\.\s+)/i 
+        {
+            level: 1,
+            regex: /^(PHẦN\s+|CHƯƠNG\s+|[A-Z]\.\s+THÔN|[A-Z]\.\s+)/i
         },
 
         // --- CẤP 2 (Group): Số La Mã (Lĩnh vực lớn) ---
         // Bắt: "I. Đặc điểm", "II. Tình hình", "Mục A"
-        { 
-            level: 2, 
-            regex: /^(MỤC\s+|[IVXLC]+\.\s+)/i 
+        {
+            level: 2,
+            regex: /^(MỤC\s+|[IVXLC]+\.\s+)/i
         },
 
         // --- CẤP 3 (Detail): Số thứ tự (Nội dung chi tiết) ---
         // Bắt: "1. Vị trí", "2. Dân số", "Điều 1", "1.1."
-        { 
-            level: 3, 
-            regex: /^(ĐIỀU\s+\d+|(\d+\.)+\s+)/i 
+        {
+            level: 3,
+            regex: /^(ĐIỀU\s+\d+|(\d+\.)+\s+)/i
         }
     ];
 
@@ -72,14 +72,14 @@ function getHeadingInfo(line) {
 /**
  * Chia văn bản thành các chunk thông minh dựa trên cấu trúc và ngữ nghĩa.
  */
-async function chunkText(text, modelForTokens) { 
+async function chunkText(text, modelForTokens) {
     console.log('[Chunking] Bắt đầu quy trình chia nhỏ văn bản (Smart Structural Split)...');
 
     // 1. Tách câu, xử lý các ký tự xuống dòng và khoảng trắng
     // Regex này tách câu dựa trên dấu chấm, hỏi, cảm thán nhưng tránh các từ viết tắt
     const splitRegex = /(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|!)\s+/g;
-    const normalizedText = text.replace(/(\r\n|\n|\r)/gm, " "); 
-    
+    const normalizedText = text.replace(/(\r\n|\n|\r)/gm, " ");
+
     // Lọc bỏ các câu quá ngắn hoặc rỗng
     const MIN_SENTENCE_LENGTH = 5;
     const sentences = normalizedText.split(splitRegex).map(s => {
@@ -87,7 +87,7 @@ async function chunkText(text, modelForTokens) {
     }).filter(s => s.length >= MIN_SENTENCE_LENGTH);
 
     if (sentences.length === 0) return [];
-    
+
     // 2. Tạo embedding ngữ nghĩa để hỗ trợ quyết định cắt (nếu cần)
     // Lưu ý: Nếu văn bản quá dài, bước này có thể tốn thời gian. 
     // Với chiến lược Heading-Base mới, ta có thể bỏ qua bước này để tăng tốc nếu muốn, 
@@ -101,7 +101,7 @@ async function chunkText(text, modelForTokens) {
     } catch (e) {
         console.warn("[Chunking] Không thể tạo embedding ngữ nghĩa, sẽ chỉ dùng cấu trúc Header.", e.message);
         // Fallback: giả định tương đồng cao để ưu tiên cắt theo Header
-        similarities = new Array(sentences.length).fill(0.9); 
+        similarities = new Array(sentences.length).fill(0.9);
     }
 
     // 3. Vòng lặp chia chunk
@@ -181,15 +181,16 @@ async function chunkText(text, modelForTokens) {
 
 const createKnowledge = async (req, res) => {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
-    
+    const modelForTokens = genAI.getGenerativeModel({ model: "gemini-3.0-flash-lite" });
+
+
     try {
         const { category, tempFilePath } = req.body;
         if (!tempFilePath) return res.status(400).json({ message: 'tempFilePath is required.' });
 
         const { finalPath, originalName } = await storageService.moveFileToKnowledgeFolder(tempFilePath);
         const absoluteFilePath = path.join(storageService.STORAGE_BASE_PATH, finalPath);
-        
+
         let fileContent = '';
         const fileExtension = path.extname(originalName).toLowerCase();
 
@@ -208,7 +209,7 @@ const createKnowledge = async (req, res) => {
 
         // Gọi hàm chunkText mới
         const chunks = await chunkText(fileContent, modelForTokens);
-        
+
         if (chunks.length === 0) return res.status(400).json({ message: 'No content extracted.' });
 
         console.log(`[Knowledge] Creating embeddings for ${chunks.length} chunks...`);
@@ -236,7 +237,7 @@ const createKnowledge = async (req, res) => {
 const updateKnowledge = async (req, res) => {
     try {
         const { id } = req.params;
-        const { content, category, source_document } = req.body; 
+        const { content, category, source_document } = req.body;
         if (!content) return res.status(400).json({ message: 'Content required.' });
 
         const embedding = await aiService.generateEmbedding(content, TaskType.RETRIEVAL_DOCUMENT);
@@ -289,8 +290,8 @@ const createKnowledgeFromText = async (req, res) => {
 
         // [TÍNH NĂNG MỚI] Nếu người dùng gửi text thô, tự động chunking thông minh
         if (text && (!chunks || chunks.length === 0)) {
-             console.log('[Manual Input] Đang chia nhỏ văn bản thủ công bằng AI Logic...');
-             chunks = await chunkText(text, modelForTokens);
+            console.log('[Manual Input] Đang chia nhỏ văn bản thủ công bằng AI Logic...');
+            chunks = await chunkText(text, modelForTokens);
         }
 
         if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
