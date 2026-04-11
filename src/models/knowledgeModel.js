@@ -13,6 +13,36 @@ const create = async (data) => {
     return rows[0];
 };
 
+const createMany = async (rowsToInsert = []) => {
+    if (!rowsToInsert.length) return [];
+
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+        const created = [];
+
+        for (const row of rowsToInsert) {
+            const { content, category, source_document, embedding } = row;
+            const query = `
+                INSERT INTO ai_knowledge (content, category, source_document, embedding)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, content, category, source_document, created_at;
+            `;
+            const params = [content, category, source_document, pgvector.toSql(embedding)];
+            const { rows } = await client.query(query, params);
+            created.push(rows[0]);
+        }
+
+        await client.query('COMMIT');
+        return created;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 const update = async (id, data) => {
     const { content, category, source_document, embedding } = data;
     const query = `
@@ -28,6 +58,12 @@ const update = async (id, data) => {
 
 const remove = async (id) => {
     await db.query('DELETE FROM ai_knowledge WHERE id = $1', [id]);
+};
+
+const removeBySourceDocument = async (sourceDocument) => {
+    const query = 'DELETE FROM ai_knowledge WHERE source_document = $1';
+    const result = await db.query(query, [sourceDocument]);
+    return result.rowCount;
 };
 
 const findAll = async (page = 1, limit = 10) => {
@@ -50,10 +86,25 @@ const findAll = async (page = 1, limit = 10) => {
 
     return {
         knowledge: dataResult.rows,
-        page: page,
+        page,
         pages: totalPages,
         total: totalItems
     };
+};
+
+const getSourcesSummary = async () => {
+    const query = `
+        SELECT
+            source_document,
+            category,
+            COUNT(*)::int AS chunk_count,
+            MAX(created_at) AS last_ingested_at
+        FROM ai_knowledge
+        GROUP BY source_document, category
+        ORDER BY last_ingested_at DESC NULLS LAST, source_document ASC;
+    `;
+    const { rows } = await db.query(query);
+    return rows;
 };
 
 const findById = async (id) => {
@@ -63,22 +114,15 @@ const findById = async (id) => {
 };
 
 const findSimilar = async (embedding, limit = 10) => {
-    // [UPDATE] Cập nhật truy vấn để lấy cả điểm khoảng cách (distance)
     const query = `
         SELECT content, embedding <=> $1 AS distance
         FROM ai_knowledge 
         ORDER BY distance ASC 
         LIMIT $2`;
     const { rows } = await db.query(query, [pgvector.toSql(embedding), limit]);
-    return rows; // Trả về toàn bộ các dòng (bao gồm cả content và distance)
+    return rows;
 };
 
-/**
- * Tìm kiếm nhanh một bản ghi khớp nhất và trả về điểm tương đồng.
- * Dùng cho bộ lọc ngữ nghĩa của AI Query Router.
- * @param {Array<number>} embedding - Vector embedding của câu hỏi.
- * @returns {Promise<{similarity_score: number}|null>} - Đối tượng chứa điểm tương đồng hoặc null.
- */
 const getTopVectorMatch = async (embedding) => {
     const query = `
         SELECT 1 - (embedding <=> $1) AS similarity_score
@@ -92,9 +136,12 @@ const getTopVectorMatch = async (embedding) => {
 
 module.exports = {
     create,
+    createMany,
     update,
     remove,
+    removeBySourceDocument,
     findAll,
+    getSourcesSummary,
     findById,
     findSimilar,
     getTopVectorMatch,
