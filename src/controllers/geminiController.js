@@ -25,7 +25,7 @@ function simpleIntentFilter(text) {
 
 const chatWithAI = async (req, res) => {
     try {
-        let { prompt, sessionId } = req.body; 
+        let { prompt, sessionId } = req.body;
         if (!prompt) return res.status(400).json({ message: 'Prompt is required.' });
 
         let history = [];
@@ -41,7 +41,7 @@ const chatWithAI = async (req, res) => {
         if (simpleReply) {
             await chatModel.addMessage(sessionId, 'model', simpleReply);
             return res.status(200).json({ reply: simpleReply, sessionId: sessionId });
-        } 
+        }
 
         // 2. Định tuyến (Router)
         const { decision } = await routeQuery(prompt);
@@ -50,22 +50,32 @@ const chatWithAI = async (req, res) => {
         if (decision === 'USE_INTERNAL_TOOLS') {
             // --- LUỒNG RAG ---
             console.log('[AI Chat] Decision: USE_INTERNAL_TOOLS (RAG)');
-            
+
             // [FIX QUAN TRỌNG] Kiểm tra xem người dùng có muốn "Tổng hợp" không?
             const pLower = prompt.toLowerCase();
             const isSummaryRequest = pLower.includes('tổng hợp') || pLower.includes('toàn bộ') || pLower.includes('tất cả') || pLower.includes('danh sách');
-            
+
             // Nếu tổng hợp -> Lấy 20 chunk để bao quát nhiều thôn/nhiều người.
             // Nếu hỏi cụ thể -> Lấy 5 chunk để chính xác và đỡ nhiễu.
-            const kLimit = isSummaryRequest ? 20 : 5; 
+            const kLimit = isSummaryRequest ? 20 : 5;
             console.log(`[AI Chat] Chế độ tìm kiếm: ${isSummaryRequest ? 'TỔNG HỢP (Top 20)' : 'CỤ THỂ (Top 5)'}`);
 
             const promptEmbedding = await aiService.generateEmbedding(prompt, TaskType.RETRIEVAL_QUERY);
-            
+
             // Gọi hàm findSimilar (Giả sử hàm này hỗ trợ tham số limit thứ 2, nếu chưa thì xem lại knowledgeModel)
             const similarChunks = await knowledgeModel.findSimilar(promptEmbedding, kLimit); // kLimit
-            
-            const context = similarChunks.map(chunk => chunk.content).join('\n\n---\n\n');
+
+            const context = similarChunks.map(chunk => {
+                const metadata = [
+                    chunk.doc_type ? `Loại văn bản: ${chunk.doc_type}` : null,
+                    chunk.symbol ? `Số ký hiệu: ${chunk.symbol}` : null,
+                    chunk.summary ? `Trích yếu: ${chunk.summary}` : null,
+                    chunk.issued_date ? `Ngày ban hành: ${new Date(chunk.issued_date).toLocaleDateString('vi-VN')}` : null,
+                    chunk.file_url ? `Link gốc: ${chunk.file_url}` : null,
+                ].filter(Boolean).join('\n');
+
+                return `${metadata}\nNội dung chunk:\n${chunk.content}`.trim();
+            }).join('\n\n---\n\n');
 
             const systemInstruction = `Bạn là trợ lý ảo chatCHS của xã Công Hải.
 Dựa vào TÀI LIỆU THAM KHẢO dưới đây, hãy trả lời câu hỏi.
@@ -76,8 +86,9 @@ YÊU CẦU:
 1. Trả lời chính xác dựa trên tài liệu.
 2. Nếu câu hỏi yêu cầu tổng hợp hoặc so sánh (ví dụ: các thôn,...), hãy trích xuất thông tin từ TẤT CẢ các đoạn tài liệu có liên quan để lập bảng hoặc liệt kê đầy đủ.
 3. Nếu tài liệu thiếu thông tin, hãy nói rõ là "Hiện tại tôi chưa được huấn luyện về vấn đề nay, mong bạn thông cảm".
-4. Giữ giọng điệu chuyên nghiệp, hành chính, không bao giờ đề cập đến việc bạn đã được cung cấp tài liệu tham khảo, chỉ cần nêu theo kiến thức được cung cấp.`;
-            
+4. Giữ giọng điệu chuyên nghiệp, hành chính, không bao giờ đề cập đến việc bạn đã được cung cấp tài liệu tham khảo, chỉ cần nêu theo kiến thức được cung cấp.
+5. Nếu trong ngữ cảnh có "Link gốc", khi trích dẫn văn bản hãy đặt cuối câu trả lời theo dạng Markdown: [📄 Xem văn bản gốc](URL).`;
+
             const ragResponse = await aiService.generateChatResponse({
                 systemInstruction: systemInstruction,
                 history: history,
@@ -86,7 +97,7 @@ YÊU CẦU:
             });
             finalReply = ragResponse.text;
 
-        } else { 
+        } else {
             // --- LUỒNG FUNCTION CALLING (GOOGLE SEARCH, ETC.) ---
             console.log('[AI Chat] Decision: USE_EXTERNAL_TOOLS');
             const externalTools = functionDeclarations.filter(tool => tool.name !== 'search_internal_knowledge_base');
@@ -96,14 +107,14 @@ YÊU CẦU:
                 prompt: prompt,
                 tools: [{ function_declarations: externalTools }, { "google_search": {} }],
                 modelType: 'flash-lite' // Lite cho function calling
-            }); 
+            });
             const functionCalls = firstResponse.functionCalls;
 
             if (functionCalls && functionCalls.length > 0) {
                 const toolResults = await Promise.all(functionCalls.map(async (call) => {
                     const toolFunction = availableTools[call.name];
-                    if (toolFunction) {                        
-                        const toolOutput = await toolFunction({ user: req.user, ...call.args });                        
+                    if (toolFunction) {
+                        const toolOutput = await toolFunction({ user: req.user, ...call.args });
                         return { part: { function_response: { name: call.name, response: { content: toolOutput } } } };
                     }
                     return { part: { function_response: { name: call.name, response: { content: "Tool not found" } } } };
@@ -116,9 +127,9 @@ YÊU CẦU:
                     modelType: 'flash'
                 });
                 finalReply = secondResponse.text;
-            } else {                
-                const fallback = await aiService.generateChatResponse({ 
-                    history: history, prompt: prompt, tools: [{ "google_search": {} }], modelType: 'flash' 
+            } else {
+                const fallback = await aiService.generateChatResponse({
+                    history: history, prompt: prompt, tools: [{ "google_search": {} }], modelType: 'flash'
                 });
                 finalReply = fallback.text;
             }

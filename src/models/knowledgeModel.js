@@ -115,9 +115,18 @@ const findById = async (id) => {
 
 const findSimilar = async (embedding, limit = 10) => {
     const query = `
-        SELECT content, embedding <=> $1 AS distance
-        FROM ai_knowledge 
-        ORDER BY distance ASC 
+        SELECT
+            a.content,
+            a.source_document,
+            a.embedding <=> $1 AS distance,
+            d.file_url,
+            d.summary,
+            d.doc_type,
+            d.symbol,
+            d.issued_date
+        FROM ai_knowledge a
+        LEFT JOIN admin_documents d ON a.source_document = d.document_code
+        ORDER BY distance ASC
         LIMIT $2`;
     const { rows } = await db.query(query, [pgvector.toSql(embedding), limit]);
     return rows;

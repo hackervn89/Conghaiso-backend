@@ -24,6 +24,7 @@ const summarizeRoutes = require('./src/routes/summarizeRoutes');
 const fileRoutes = require('./src/routes/fileRoutes');
 const draftRoutes = require('./src/routes/draftRoutes');
 const knowledgeRoutes = require('./src/routes/knowledgeRoutes'); // [AI-FEATURE]
+const adminDocumentRoutes = require('./src/routes/adminDocumentRoutes');
 const anchorKeywordRoutes = require('./src/routes/anchorKeywordRoutes'); // [AI-FEATURE]
 const geminiRoutes = require('./src/routes/geminiRoutes'); // [AI-FEATURE]
 const chatRoutes = require('./src/routes/chatRoutes'); // [AI-FEATURE] - Route mới cho quản lý phiên chat
@@ -194,6 +195,7 @@ app.use('/api/summarize', summarizeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/drafts', draftRoutes);
 app.use('/api/knowledge', knowledgeRoutes); // [AI-FEATURE]
+app.use('/api/admin-documents', adminDocumentRoutes);
 app.use('/api/anchor-keywords', anchorKeywordRoutes); // [AI-FEATURE]
 app.use('/api', geminiRoutes); // [AI-FEATURE] for /api/chat
 app.use('/api/chat', chatRoutes); // [AI-FEATURE] - Sử dụng route quản lý phiên chat

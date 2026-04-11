@@ -1,22 +1,19 @@
-const knowledgeModel = require('../models/knowledgeModel');
-const aiService = require('../services/aiService');
 const storageService = require('../services/storageService');
 const { generateKnowledgeChunks } = require('../services/chunkingService');
-const fs = require('fs/promises');
-const pdf = require('pdf-extraction');
-const mammoth = require('mammoth');
-const path = require('path');
+const aiService = require('../services/aiService');
+const knowledgeModel = require('../models/knowledgeModel');
+const {
+    extractTextFromKnowledgeFile,
+    ingestChunksToKnowledge,
+    ingestFromTempPath,
+} = require('../services/knowledgeIngestService');
 const { TaskType } = require('@google/generative-ai');
-
-const SUPPORTED_KNOWLEDGE_EXTENSIONS = new Set(['.docx', '.pdf', '.txt']);
 
 const toBoolean = (value) => {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'string') return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
     return false;
 };
-
-const sanitizeChunk = (chunk) => chunk.replace(/\x00/g, '').trim();
 
 const decodeFilename = (filename = '') => {
     try {
@@ -25,80 +22,6 @@ const decodeFilename = (filename = '') => {
         return filename;
     }
 };
-
-async function extractTextFromKnowledgeFile(absoluteFilePath, sourceFilename) {
-    const fileExtension = path.extname(sourceFilename).toLowerCase();
-
-    if (!SUPPORTED_KNOWLEDGE_EXTENSIONS.has(fileExtension)) {
-        throw new Error('UNSUPPORTED_FILE_TYPE');
-    }
-
-    if (fileExtension === '.docx') {
-        const result = await mammoth.extractRawText({ path: absoluteFilePath });
-        return result.value;
-    }
-
-    if (fileExtension === '.pdf') {
-        const dataBuffer = await fs.readFile(absoluteFilePath);
-        const data = await pdf(dataBuffer);
-        return data.text;
-    }
-
-    return fs.readFile(absoluteFilePath, 'utf-8');
-}
-
-async function ingestChunksToKnowledge({ chunks, category, sourceDocument, replaceExisting = false }) {
-    const sanitizedChunks = chunks.map(sanitizeChunk).filter(Boolean);
-    if (sanitizedChunks.length === 0) return { ingestedChunks: [], removedCount: 0 };
-
-    if (replaceExisting) {
-        await knowledgeModel.removeBySourceDocument(sourceDocument);
-    }
-
-    const embeddings = await aiService.generateEmbedding(sanitizedChunks, TaskType.RETRIEVAL_DOCUMENT);
-
-    const rowsToInsert = sanitizedChunks.map((content, index) => ({
-        content,
-        category: category || 'Uncategorized',
-        source_document: sourceDocument,
-        embedding: embeddings[index],
-    }));
-
-    const ingestedChunks = await knowledgeModel.createMany(rowsToInsert);
-    return {
-        ingestedChunks,
-        removedCount: replaceExisting ? rowsToInsert.length : 0,
-    };
-}
-
-async function ingestContent({ content, category, sourceDocument, replaceExisting = false }) {
-    const chunks = generateKnowledgeChunks(content);
-    if (chunks.length === 0) {
-        throw new Error('EMPTY_EXTRACTED_CONTENT');
-    }
-
-    const { ingestedChunks } = await ingestChunksToKnowledge({
-        chunks,
-        category,
-        sourceDocument,
-        replaceExisting,
-    });
-
-    return { chunks, ingestedChunks };
-}
-
-async function ingestFromTempPath({ tempFilePath, category, replaceExisting = false }) {
-    const { finalPath, originalName } = await storageService.moveFileToKnowledgeFolder(tempFilePath);
-    const absoluteFilePath = path.join(storageService.STORAGE_BASE_PATH, finalPath);
-
-    const fileContent = await extractTextFromKnowledgeFile(absoluteFilePath, originalName);
-    return ingestContent({
-        content: fileContent,
-        category,
-        sourceDocument: originalName,
-        replaceExisting,
-    });
-}
 
 const ingestUploadedKnowledgeFile = async (req, res) => {
     try {
@@ -135,6 +58,9 @@ const ingestUploadedKnowledgeFile = async (req, res) => {
         if (error.message === 'EMPTY_EXTRACTED_CONTENT') {
             return res.status(400).json({ message: 'Không trích xuất được nội dung hữu ích từ tệp.' });
         }
+        if (error.message === 'PDF_NO_TEXT_LAYER') {
+            return res.status(400).json({ message: 'PDF này có thể là file scan ảnh (không có text layer). Vui lòng OCR trước hoặc dùng bản PDF có thể copy text.' });
+        }
 
         console.error('Error ingesting uploaded knowledge file:', error);
         return res.status(500).json({ message: 'Đã có lỗi xảy ra khi nạp tri thức từ tệp.' });
@@ -169,6 +95,9 @@ const createKnowledge = async (req, res) => {
         }
         if (error.message === 'EMPTY_EXTRACTED_CONTENT') {
             return res.status(400).json({ message: 'No content extracted.' });
+        }
+        if (error.message === 'PDF_NO_TEXT_LAYER') {
+            return res.status(400).json({ message: 'This PDF appears to be image-scanned (no text layer). Please OCR it first or upload a text-based PDF.' });
         }
 
         console.error('Error creating knowledge:', error);
@@ -277,4 +206,5 @@ module.exports = {
     getKnowledgeSources,
     getKnowledgeById,
     createKnowledgeFromText,
+    extractTextFromKnowledgeFile,
 };
