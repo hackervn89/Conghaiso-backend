@@ -34,6 +34,7 @@ const redisClient = require("./src/services/redisService"); // Client Redis chí
 
 
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = http.createServer(app);
 
 // --- ĐẶT MIDDLEWARE DEBUG Ở ĐÂY ---
@@ -206,16 +207,16 @@ const { loadKeywordsToCache } = require('./src/config/keywordCache');
 const db = require('./src/config/database');
 
 const initializeApp = async () => {
-    try {
-        const client = await db.getClient();
-        logger.info('Đã kết nối thành công đến cơ sở dữ liệu.');
-        client.release();
+  try {
+    const client = await db.getClient();
+    logger.info('Đã kết nối thành công đến cơ sở dữ liệu.');
+    client.release();
 
-        await loadKeywordsToCache();
-    } catch (err) {
-        logger.error('Không thể khởi tạo ứng dụng', { error: err.message, stack: err.stack });
-        process.exit(1);
-    }
+    await loadKeywordsToCache();
+  } catch (err) {
+    logger.error('Không thể khởi tạo ứng dụng', { error: err.message, stack: err.stack });
+    process.exit(1);
+  }
 };
 
 // Logic xử lý Socket.IO
@@ -228,21 +229,21 @@ io.on('connection', (socket) => {
 
   socket.on('join_meeting_room', (meetingId) => {
     try {
-        const roomName = `meeting-room-${meetingId}`;
-        socket.join(roomName);
-        logger.debug(`Client joined room`, { socketId: socket.id, room: roomName });
+      const roomName = `meeting-room-${meetingId}`;
+      socket.join(roomName);
+      logger.debug(`Client joined room`, { socketId: socket.id, room: roomName });
     } catch (joinError) {
-        logger.error(`Error joining room`, { socketId: socket.id, meetingId, error: joinError.message });
+      logger.error(`Error joining room`, { socketId: socket.id, meetingId, error: joinError.message });
     }
   });
 
   socket.on('leave_meeting_room', (meetingId) => {
-     try {
-        const roomName = `meeting-room-${meetingId}`;
-        socket.leave(roomName);
-        logger.debug(`Client left room`, { socketId: socket.id, room: roomName });
+    try {
+      const roomName = `meeting-room-${meetingId}`;
+      socket.leave(roomName);
+      logger.debug(`Client left room`, { socketId: socket.id, room: roomName });
     } catch (leaveError) {
-         logger.error(`Error leaving room`, { socketId: socket.id, meetingId, error: leaveError.message });
+      logger.error(`Error leaving room`, { socketId: socket.id, meetingId, error: leaveError.message });
     }
   });
 
@@ -262,8 +263,8 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 initializeApp().then(() => {
-    httpServer.listen(PORT, () => {
-        logger.info(`🚀 Server đang chạy tại http://localhost:${PORT}`);
-        cronService.initializeCronJobs();
-    });
+  httpServer.listen(PORT, () => {
+    logger.info(`🚀 Server đang chạy tại http://localhost:${PORT}`);
+    cronService.initializeCronJobs();
+  });
 });
