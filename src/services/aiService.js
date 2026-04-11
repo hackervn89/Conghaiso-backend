@@ -4,14 +4,12 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // --- CẤU HÌNH MODEL (Đã tối ưu hóa Quota) ---
 
-// [UPDATE] Sử dụng Gemini 3.0 Flash Lite: Phiên bản Lite thế hệ 3 mới nhất.
 const flashLiteModel = genAI.getGenerativeModel({
-    model: "gemini-3.0-flash-lite", 
+    model: process.env.CHAT_MODEL || "gemini-3.1-flash-lite-preview", 
 });
 
-// [UPDATE] Sử dụng Gemini 3.0 Flash Lite cho RAG & Search
 const flashModel = genAI.getGenerativeModel({
-    model: "gemini-3.0-flash-lite",
+    model: process.env.RAG_MODEL || "gemini-2.5-flash",
     tools: [{ "google_search": {} }], 
 });
 
@@ -80,7 +78,7 @@ const generateChatResponse = async ({ systemInstruction, history = [], prompt, t
     // flash-lite -> gemini-1.5-flash-8b (Nhanh, Rẻ)
     // flash -> gemini-1.5-flash (Thông minh, Ổn định)
     const chatModel = modelType === 'flash-lite' ? flashLiteModel : flashModel;
-    const modelName = 'gemini-3.0-flash-lite';
+    const modelName = modelType === 'flash-lite' ? (process.env.CHAT_MODEL || 'gemini-3.1-flash-lite-preview') : (process.env.RAG_MODEL || 'gemini-2.5-flash');
 
     const execute = async (retriesLeft, delay) => {
         try {

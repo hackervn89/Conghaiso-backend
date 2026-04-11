@@ -5,9 +5,8 @@ const { STORAGE_BASE_PATH } = require("../services/storageService");
 
 // Khởi tạo Gemini AI với khóa API
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// Change model name here
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash",
+    model: process.env.SUMMARY_MODEL || "gemini-2.5-flash",
     tools: [{ "google_search": {} }],
 });
 
