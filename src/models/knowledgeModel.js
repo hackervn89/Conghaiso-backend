@@ -113,12 +113,31 @@ const findById = async (id) => {
     return rows[0];
 };
 
-const findSimilar = async (embedding, limit = 10) => {
+const normalizeSearchText = (value = '') => String(value || '').trim();
+
+const findSimilar = async (embedding, limit = 10, queryText = '') => {
+    const normalizedQueryText = normalizeSearchText(queryText);
     const query = `
         SELECT
             a.content,
             a.source_document,
             a.embedding <=> $1 AS distance,
+            1 - (a.embedding <=> $1) AS semantic_score,
+            CASE
+                WHEN $3 = '' THEN 0
+                ELSE ts_rank_cd(
+                    to_tsvector('simple', COALESCE(a.content, '') || ' ' || COALESCE(a.source_document, '')),
+                    websearch_to_tsquery('simple', $3)
+                )
+            END AS keyword_score,
+            CASE
+                WHEN $4 = '' THEN 0
+                WHEN a.source_document ILIKE $4 THEN 0.35
+                WHEN COALESCE(d.symbol, '') ILIKE $4 THEN 0.30
+                WHEN COALESCE(d.summary, '') ILIKE $4 THEN 0.15
+                WHEN a.content ILIKE $4 THEN 0.10
+                ELSE 0
+            END AS exact_match_boost,
             d.file_url,
             d.summary,
             d.doc_type,
@@ -126,9 +145,35 @@ const findSimilar = async (embedding, limit = 10) => {
             d.issued_date
         FROM ai_knowledge a
         LEFT JOIN admin_documents d ON a.source_document = d.document_code
-        ORDER BY distance ASC
+        ORDER BY ((1 - (a.embedding <=> $1)) * 0.72 +
+                  CASE
+                      WHEN $3 = '' THEN 0
+                      ELSE LEAST(
+                          ts_rank_cd(
+                              to_tsvector('simple', COALESCE(a.content, '') || ' ' || COALESCE(a.source_document, '')),
+                              websearch_to_tsquery('simple', $3)
+                          ),
+                          1.0
+                      ) * 0.20
+                  END +
+                  CASE
+                      WHEN $4 = '' THEN 0
+                      WHEN a.source_document ILIKE $4 THEN 0.35
+                      WHEN COALESCE(d.symbol, '') ILIKE $4 THEN 0.30
+                      WHEN COALESCE(d.summary, '') ILIKE $4 THEN 0.15
+                      WHEN a.content ILIKE $4 THEN 0.10
+                      ELSE 0
+                  END * 0.08
+                 ) DESC,
+                 distance ASC
         LIMIT $2`;
-    const { rows } = await db.query(query, [pgvector.toSql(embedding), limit]);
+
+    const { rows } = await db.query(query, [
+        pgvector.toSql(embedding),
+        limit,
+        normalizedQueryText,
+        normalizedQueryText ? `%${normalizedQueryText}%` : '',
+    ]);
     return rows;
 };
 

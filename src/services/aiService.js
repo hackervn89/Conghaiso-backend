@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const CHAT_MODEL = process.env.CHAT_MODEL || 'gemini-3.1-flash-lite-preview';
 const RAG_MODEL = process.env.RAG_MODEL || 'gemini-3.1-flash-lite-preview';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'gemini-embedding-001';
+const EMBEDDING_OUTPUT_DIMENSIONS = Number(process.env.EMBEDDING_OUTPUT_DIMENSIONS || 0);
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -13,18 +14,28 @@ const ragModel = genAI.getGenerativeModel({
 });
 const embeddingModel = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
 
+const getEmbeddingConfig = () => {
+    if (!Number.isInteger(EMBEDDING_OUTPUT_DIMENSIONS) || EMBEDDING_OUTPUT_DIMENSIONS <= 0) {
+        return undefined;
+    }
+
+    return { outputDimensionality: EMBEDDING_OUTPUT_DIMENSIONS };
+};
+
 const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
     try {
         if (Array.isArray(textOrChunks)) {
             const BATCH_SIZE = 100;
             let allEmbeddings = [];
 
+            const embeddingConfig = getEmbeddingConfig();
             const requests = textOrChunks.map((chunk) => ({
                 content: { role: 'user', parts: [{ text: chunk }] },
                 taskType,
+                ...(embeddingConfig ? { outputDimensionality: embeddingConfig.outputDimensionality } : {}),
             }));
 
-            console.log(`[AI Service] Embedding ${requests.length} chunks (Model: ${EMBEDDING_MODEL})...`);
+            console.log(`[AI Service] Embedding ${requests.length} chunks (Model: ${EMBEDDING_MODEL}${embeddingConfig ? `, Dimensions: ${embeddingConfig.outputDimensionality}` : ''})...`);
 
             for (let i = 0; i < requests.length; i += BATCH_SIZE) {
                 const batchRequests = requests.slice(i, i + BATCH_SIZE);
@@ -36,10 +47,12 @@ const generateEmbedding = async (textOrChunks, taskType, title = undefined) => {
             return allEmbeddings;
         }
 
+        const embeddingConfig = getEmbeddingConfig();
         const result = await embeddingModel.embedContent({
             content: { role: 'user', parts: [{ text: textOrChunks }] },
             taskType,
             title,
+            ...(embeddingConfig ? { outputDimensionality: embeddingConfig.outputDimensionality } : {}),
         });
         return result.embedding.values;
     } catch (error) {

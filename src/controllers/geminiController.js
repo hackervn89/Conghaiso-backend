@@ -63,7 +63,7 @@ const chatWithAI = async (req, res) => {
             const promptEmbedding = await aiService.generateEmbedding(prompt, TaskType.RETRIEVAL_QUERY);
 
             // Gọi hàm findSimilar (Giả sử hàm này hỗ trợ tham số limit thứ 2, nếu chưa thì xem lại knowledgeModel)
-            const similarChunks = await knowledgeModel.findSimilar(promptEmbedding, kLimit); // kLimit
+            const similarChunks = await knowledgeModel.findSimilar(promptEmbedding, kLimit, prompt);
             const hasInternalContext = similarChunks.length > 0;
 
             const context = similarChunks.map(chunk => {
@@ -72,6 +72,9 @@ const chatWithAI = async (req, res) => {
                     chunk.symbol ? `Số ký hiệu: ${chunk.symbol}` : null,
                     chunk.summary ? `Trích yếu: ${chunk.summary}` : null,
                     chunk.issued_date ? `Ngày ban hành: ${new Date(chunk.issued_date).toLocaleDateString('vi-VN')}` : null,
+                    typeof chunk.semantic_score === 'number' ? `Điểm ngữ nghĩa: ${Number(chunk.semantic_score).toFixed(4)}` : null,
+                    typeof chunk.keyword_score === 'number' ? `Điểm từ khóa: ${Number(chunk.keyword_score).toFixed(4)}` : null,
+                    typeof chunk.exact_match_boost === 'number' ? `Điểm khớp chính xác: ${Number(chunk.exact_match_boost).toFixed(4)}` : null,
                     chunk.file_url ? `Link gốc: ${chunk.file_url}` : null,
                 ].filter(Boolean).join('\n');
 
@@ -92,8 +95,9 @@ YÊU CẦU:
 4. Nếu không có hoặc không đủ tài liệu nội bộ, bạn VẪN phải trả lời bằng kiến thức chung/suy luận hợp lý của mình, thay vì từ chối kiểu "chưa được huấn luyện".
 5. Khi câu trả lời có dùng kiến thức ngoài tài liệu nội bộ, hãy ghi rõ ngắn gọn cuối câu trả lời: "Lưu ý: phần trả lời này dựa trên kiến thức chung, không phải trích xuất từ tài liệu nội bộ của xã Công Hải."
 6. Nếu trong ngữ cảnh có "Link gốc", khi trích dẫn văn bản nội bộ hãy đặt cuối ý liên quan theo dạng Markdown: [📄 Xem văn bản gốc](URL).
-7. Giữ giọng điệu chuyên nghiệp, rõ ràng, hữu ích; không nói rằng bạn bị giới hạn huấn luyện trừ khi thật sự không thể suy luận hoặc thông tin có rủi ro cao.
-8. Với câu hỏi về thời sự/nhân sự/chức danh có thể thay đổi theo thời gian, nếu bạn không có dữ liệu cập nhật chắc chắn thì phải nói rõ có thể đã thay đổi và khuyên người dùng kiểm tra nguồn chính thức mới nhất.`;
+7. Với văn bản hành chính có mã/số hiệu cụ thể, hãy ưu tiên các chunk có điểm từ khóa/khớp chính xác cao hơn, tránh trộn nhầm văn bản khác chỉ vì gần nghĩa.
+8. Giữ giọng điệu chuyên nghiệp, rõ ràng, hữu ích; không nói rằng bạn bị giới hạn huấn luyện trừ khi thật sự không thể suy luận hoặc thông tin có rủi ro cao.
+9. Với câu hỏi về thời sự/nhân sự/chức danh có thể thay đổi theo thời gian, nếu bạn không có dữ liệu cập nhật chắc chắn thì phải nói rõ có thể đã thay đổi và khuyên người dùng kiểm tra nguồn chính thức mới nhất.`;
 
             const ragResponse = await aiService.generateChatResponse({
                 systemInstruction: systemInstruction,
