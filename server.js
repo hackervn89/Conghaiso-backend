@@ -61,6 +61,8 @@ const globalLimiter = rateLimit({
   max: 150,
   standardHeaders: true,
   legacyHeaders: false,
+  // Không áp global limiter cho nhóm admin-documents vì đã có limiter riêng theo user ở route.
+  skip: (req) => req.originalUrl.startsWith('/api/admin-documents'),
   message: { message: 'Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau 15 phút.' },
   handler: (req, res, next, options) => {
     logger.warn(`Rate limit exceeded`, { ip: req.ip, path: req.originalUrl });
