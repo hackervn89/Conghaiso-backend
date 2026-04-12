@@ -64,6 +64,7 @@ const chatWithAI = async (req, res) => {
 
             // Gọi hàm findSimilar (Giả sử hàm này hỗ trợ tham số limit thứ 2, nếu chưa thì xem lại knowledgeModel)
             const similarChunks = await knowledgeModel.findSimilar(promptEmbedding, kLimit); // kLimit
+            const hasInternalContext = similarChunks.length > 0;
 
             const context = similarChunks.map(chunk => {
                 const metadata = [
@@ -78,16 +79,21 @@ const chatWithAI = async (req, res) => {
             }).join('\n\n---\n\n');
 
             const systemInstruction = `Bạn là trợ lý ảo chatCHS của xã Công Hải.
-Dựa vào TÀI LIỆU THAM KHẢO dưới đây, hãy trả lời câu hỏi.
---- BẮT ĐẦU TÀI LIỆU ---
+
+${hasInternalContext ? `Dưới đây là NGỮ CẢNH nội bộ liên quan để tham khảo ưu tiên:
+--- BẮT ĐẦU NGỮ CẢNH ---
 ${context}
---- KẾT THÚC TÀI LIỆU ---
+--- KẾT THÚC NGỮ CẢNH ---` : 'Hiện không có ngữ cảnh nội bộ đủ mạnh đi kèm cho câu hỏi này.'}
+
 YÊU CẦU:
-1. Trả lời chính xác dựa trên tài liệu.
-2. Nếu câu hỏi yêu cầu tổng hợp hoặc so sánh (ví dụ: các thôn,...), hãy trích xuất thông tin từ TẤT CẢ các đoạn tài liệu có liên quan để lập bảng hoặc liệt kê đầy đủ.
-3. Nếu tài liệu thiếu thông tin, hãy nói rõ là "Hiện tại tôi chưa được huấn luyện về vấn đề nay, mong bạn thông cảm".
-4. Giữ giọng điệu chuyên nghiệp, hành chính, không bao giờ đề cập đến việc bạn đã được cung cấp tài liệu tham khảo, chỉ cần nêu theo kiến thức được cung cấp.
-5. Nếu trong ngữ cảnh có "Link gốc", khi trích dẫn văn bản hãy đặt cuối câu trả lời theo dạng Markdown: [📄 Xem văn bản gốc](URL).`;
+1. Luôn cố gắng trả lời được câu hỏi của người dùng một cách hữu ích, đầy đủ và tự nhiên.
+2. Nếu ngữ cảnh nội bộ ở trên liên quan và đủ thông tin, ưu tiên dùng nó làm căn cứ chính.
+3. Nếu ngữ cảnh nội bộ chỉ đủ một phần, hãy kết hợp: phần nào chắc chắn theo tài liệu nội bộ thì nêu theo tài liệu; phần còn thiếu có thể bổ sung bằng kiến thức chung của bạn một cách thận trọng.
+4. Nếu không có hoặc không đủ tài liệu nội bộ, bạn VẪN phải trả lời bằng kiến thức chung/suy luận hợp lý của mình, thay vì từ chối kiểu "chưa được huấn luyện".
+5. Khi câu trả lời có dùng kiến thức ngoài tài liệu nội bộ, hãy ghi rõ ngắn gọn cuối câu trả lời: "Lưu ý: phần trả lời này dựa trên kiến thức chung, không phải trích xuất từ tài liệu nội bộ của xã Công Hải."
+6. Nếu trong ngữ cảnh có "Link gốc", khi trích dẫn văn bản nội bộ hãy đặt cuối ý liên quan theo dạng Markdown: [📄 Xem văn bản gốc](URL).
+7. Giữ giọng điệu chuyên nghiệp, rõ ràng, hữu ích; không nói rằng bạn bị giới hạn huấn luyện trừ khi thật sự không thể suy luận hoặc thông tin có rủi ro cao.
+8. Với câu hỏi về thời sự/nhân sự/chức danh có thể thay đổi theo thời gian, nếu bạn không có dữ liệu cập nhật chắc chắn thì phải nói rõ có thể đã thay đổi và khuyên người dùng kiểm tra nguồn chính thức mới nhất.`;
 
             const ragResponse = await aiService.generateChatResponse({
                 systemInstruction: systemInstruction,
@@ -122,7 +128,7 @@ YÊU CẦU:
 
                 const secondResponse = await aiService.generateChatResponse({
                     history: [...history, { role: "user", parts: [{ text: prompt }] }, { role: "model", parts: functionCalls.map(fc => ({ function_call: fc })) }],
-                    systemInstruction: `Bạn là chatCHS. Trả lời dựa trên kết quả công cụ.`,
+                    systemInstruction: `Bạn là chatCHS. Hãy trả lời hữu ích và đầy đủ dựa trên kết quả công cụ. Nếu kết quả công cụ chưa đủ, bạn được phép dùng kiến thức chung để hoàn thiện câu trả lời. Khi có phần không đến từ tài liệu nội bộ, hãy ghi chú ngắn gọn rằng đó là kiến thức chung chứ không phải trích xuất từ tài liệu nội bộ của xã Công Hải.`,
                     prompt: toolResults.map(tr => tr.part),
                     modelType: 'flash'
                 });
