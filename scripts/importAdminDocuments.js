@@ -1,10 +1,9 @@
+require('dotenv').config();
 const fs = require('fs/promises');
 const path = require('path');
 const xlsx = require('xlsx');
 const adminDocumentModel = require('../src/models/adminDocumentModel');
 
-const EXCEL_PATH = path.join(__dirname, '../../data/Dac_ta_du_lieu_2025_2030.xlsx');
-const DATA_ROOT = path.join(__dirname, '../../data/1. LƯU VB DO ĐẢNG UỶ BAN HÀNH NHIỆM KỲ 2025-2030');
 const TARGET_SHEETS = new Set(['Báo cáo', 'Nghị quyết']);
 
 function normalizeText(value = '') {
@@ -24,6 +23,51 @@ function parseDate(value) {
 
 function buildDocumentUrl(documentCode) {
     return `/api/admin-documents/download/${encodeURIComponent(documentCode)}`;
+}
+
+async function pathExists(targetPath) {
+    try {
+        await fs.access(targetPath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function resolveExcelPath() {
+    const candidates = [
+        process.env.ADMIN_DOCS_EXCEL_PATH,
+        path.join(process.cwd(), 'Dac_ta_du_lieu_2025_2030.xlsx'),
+        path.join(__dirname, '../Dac_ta_du_lieu_2025_2030.xlsx'),
+        path.join(__dirname, '../../data/Dac_ta_du_lieu_2025_2030.xlsx'),
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const absolute = path.resolve(candidate);
+        if (await pathExists(absolute)) {
+            return absolute;
+        }
+    }
+
+    throw new Error(`Không tìm thấy file Excel metadata. Hãy đặt biến ADMIN_DOCS_EXCEL_PATH hoặc đặt file Dac_ta_du_lieu_2025_2030.xlsx trong backend/data.`);
+}
+
+async function resolveDataRoot() {
+    const candidates = [
+        process.env.ADMIN_DOCS_DATA_ROOT,
+        path.join(process.cwd(), '../data/1. LƯU VB DO ĐẢNG UỶ BAN HÀNH NHIỆM KỲ 2025-2030'),
+        path.join(__dirname, '../../data/1. LƯU VB DO ĐẢNG UỶ BAN HÀNH NHIỆM KỲ 2025-2030'),
+        path.join(process.cwd(), 'data/1. LƯU VB DO ĐẢNG UỶ BAN HÀNH NHIỆM KỲ 2025-2030'),
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const absolute = path.resolve(candidate);
+        if (await pathExists(absolute)) {
+            return absolute;
+        }
+    }
+
+    throw new Error('Không tìm thấy thư mục dữ liệu gốc. Hãy đặt biến ADMIN_DOCS_DATA_ROOT trỏ đến thư mục chứa PDF.');
 }
 
 async function buildFileIndex(rootDir) {
@@ -54,8 +98,14 @@ async function buildFileIndex(rootDir) {
 }
 
 async function main() {
-    const workbook = xlsx.readFile(EXCEL_PATH);
-    const fileIndex = await buildFileIndex(DATA_ROOT);
+    const excelPath = await resolveExcelPath();
+    const dataRoot = await resolveDataRoot();
+
+    console.log(`[IMPORT] Excel path: ${excelPath}`);
+    console.log(`[IMPORT] Data root: ${dataRoot}`);
+
+    const workbook = xlsx.readFile(excelPath);
+    const fileIndex = await buildFileIndex(dataRoot);
 
     let imported = 0;
     let skipped = 0;
