@@ -5,6 +5,9 @@ const { functionDeclarations, availableTools } = require('../services/aiToolServ
 const { TaskType } = require('@google/generative-ai');
 const { routeQuery } = require('../services/queryRouterService');
 
+const DEFAULT_RAG_TOP_K = Number(process.env.RAG_TOP_K || 12);
+const DEFAULT_RAG_SUMMARY_TOP_K = Number(process.env.RAG_SUMMARY_TOP_K || 30);
+
 /**
  * Bộ lọc ý định đơn giản (Lời chào, cảm ơn)
  */
@@ -55,10 +58,10 @@ const chatWithAI = async (req, res) => {
             const pLower = prompt.toLowerCase();
             const isSummaryRequest = pLower.includes('tổng hợp') || pLower.includes('toàn bộ') || pLower.includes('tất cả') || pLower.includes('danh sách');
 
-            // Nếu tổng hợp -> Lấy 20 chunk để bao quát nhiều thôn/nhiều người.
-            // Nếu hỏi cụ thể -> Lấy 5 chunk để chính xác và đỡ nhiễu.
-            const kLimit = isSummaryRequest ? 20 : 5;
-            console.log(`[AI Chat] Chế độ tìm kiếm: ${isSummaryRequest ? 'TỔNG HỢP (Top 20)' : 'CỤ THỂ (Top 5)'}`);
+            // Với văn bản hành chính dài, 5 chunk thường quá ít nếu 1 tài liệu có 10-15 chunk.
+            // Cho phép cấu hình qua env để dễ tinh chỉnh theo thực tế dữ liệu.
+            const kLimit = isSummaryRequest ? DEFAULT_RAG_SUMMARY_TOP_K : DEFAULT_RAG_TOP_K;
+            console.log(`[AI Chat] Chế độ tìm kiếm: ${isSummaryRequest ? `TỔNG HỢP (Top ${DEFAULT_RAG_SUMMARY_TOP_K})` : `CỤ THỂ (Top ${DEFAULT_RAG_TOP_K})`}`);
 
             const promptEmbedding = await aiService.generateEmbedding(prompt, TaskType.RETRIEVAL_QUERY);
 
